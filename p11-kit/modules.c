@@ -595,8 +595,10 @@ reinitialize_after_fork (void)
 
 		if (gl.modules) {
 			_p11_hash_iterate (gl.modules, &iter);
-			while (_p11_hash_next (&iter, NULL, (void **)&mod))
-				mod->initialize_called = 0;
+			while (_p11_hash_next (&iter, NULL, (void **)&mod)) {
+				if (mod->initialize_called)
+					mod->initialize_called = 0;
+			}
 		}
 
 	_p11_unlock ();
