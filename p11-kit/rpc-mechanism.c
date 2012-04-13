@@ -23,44 +23,10 @@
 
 #include "config.h"
 
-#include "rpc-private.h"
+#include "rpc-mechanism.h"
 
-#include <stdarg.h>
+#include <assert.h>
 #include <string.h>
-#include <stdio.h>
-
-static void
-do_log (const char *pref, const char *msg, va_list va)
-{
-	char buffer[1024];
-	size_t len = 0;
-
-	if (pref) {
-		snprintf (buffer, sizeof (buffer), "%s: ", pref);
-		len = strlen (buffer);
-	}
-
-	vsnprintf (buffer + len, sizeof (buffer) - len, msg, va);
-	_p11_rpc_log (buffer);
-}
-
-void
-_p11_rpc_warn (const char* msg, ...)
-{
-	va_list va;
-	va_start (va, msg);
-	do_log ("WARNING: gnome-keyring:", msg, va);
-	va_end (va);
-}
-
-void
-_p11_rpc_debug (const char* msg, ...)
-{
-	va_list va;
-	va_start (va, msg);
-	do_log ("DEBUG: gnome-keyring:", msg, va);
-	va_end (va);
-}
 
 int
 _p11_rpc_mechanism_is_supported (CK_MECHANISM_TYPE mech)

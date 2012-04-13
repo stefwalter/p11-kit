@@ -27,19 +27,19 @@
 
 #include "buffer.h"
 
-#define DEFAULT_ALLOCATOR  ((buffer_allocator)realloc)
+#define DEFAULT_ALLOCATOR  ((BufferAllocator)realloc)
 
 int
-_p11_buffer_init (buffer_t *buffer,
+_p11_buffer_init (Buffer *buffer,
                   size_t reserve)
 {
 	return _p11_buffer_init_full (buffer, reserve, NULL);
 }
 
 int
-_p11_buffer_init_full (buffer_t *buffer,
+_p11_buffer_init_full (Buffer *buffer,
                        size_t reserve,
-                       buffer_allocator allocator)
+                       BufferAllocator allocator)
 {
 	memset (buffer, 0, sizeof (*buffer));
 
@@ -63,7 +63,7 @@ _p11_buffer_init_full (buffer_t *buffer,
 }
 
 void
-_p11_buffer_init_static (buffer_t *buffer,
+_p11_buffer_init_static (Buffer *buffer,
                          const unsigned char *buf,
                          size_t len)
 {
@@ -79,10 +79,10 @@ _p11_buffer_init_static (buffer_t *buffer,
 }
 
 void
-_p11_buffer_init_allocated (buffer_t *buffer,
+_p11_buffer_init_allocated (Buffer *buffer,
                             unsigned char *buf,
                             size_t len,
-                            buffer_allocator allocator)
+                            BufferAllocator allocator)
 {
 	memset (buffer, 0, sizeof (*buffer));
 
@@ -97,7 +97,7 @@ _p11_buffer_init_allocated (buffer_t *buffer,
 }
 
 void
-_p11_buffer_reset (buffer_t *buffer)
+_p11_buffer_reset (Buffer *buffer)
 {
 	memset (buffer->buf, 0, buffer->allocated_len);
 	buffer->len = 0;
@@ -105,7 +105,7 @@ _p11_buffer_reset (buffer_t *buffer)
 }
 
 void
-_p11_buffer_uninit (buffer_t *buffer)
+_p11_buffer_uninit (Buffer *buffer)
 {
 	if (!buffer)
 		return;
@@ -121,7 +121,7 @@ _p11_buffer_uninit (buffer_t *buffer)
 }
 
 unsigned char *
-_p11_buffer_uninit_steal (buffer_t *buffer,
+_p11_buffer_uninit_steal (Buffer *buffer,
                           size_t *n_result)
 {
 	unsigned char *result;
@@ -136,8 +136,8 @@ _p11_buffer_uninit_steal (buffer_t *buffer,
 }
 
 int
-_p11_buffer_set_allocator (buffer_t *buffer,
-                           buffer_allocator allocator)
+_p11_buffer_set_allocator (Buffer *buffer,
+                           BufferAllocator allocator)
 {
 	unsigned char *buf = NULL;
 
@@ -167,8 +167,8 @@ _p11_buffer_set_allocator (buffer_t *buffer,
 }
 
 int
-_p11_buffer_equal (buffer_t *b1,
-                   buffer_t *b2)
+_p11_buffer_equal (Buffer *b1,
+                   Buffer *b2)
 {
 	if (b1->len != b2->len)
 		return 0;
@@ -176,7 +176,7 @@ _p11_buffer_equal (buffer_t *b1,
 }
 
 int
-_p11_buffer_reserve (buffer_t *buffer, size_t len)
+_p11_buffer_reserve (Buffer *buffer, size_t len)
 {
 	unsigned char *newbuf;
 	size_t newlen;
@@ -209,7 +209,7 @@ _p11_buffer_reserve (buffer_t *buffer, size_t len)
 }
 
 int
-_p11_buffer_resize (buffer_t *buffer,
+_p11_buffer_resize (Buffer *buffer,
                     size_t len)
 {
 	if (!_p11_buffer_reserve (buffer, len))
@@ -220,7 +220,7 @@ _p11_buffer_resize (buffer_t *buffer,
 }
 
 unsigned char*
-_p11_buffer_add_empty (buffer_t *buffer,
+_p11_buffer_add_empty (Buffer *buffer,
                        size_t len)
 {
 	size_t pos = buffer->len;
@@ -231,7 +231,7 @@ _p11_buffer_add_empty (buffer_t *buffer,
 }
 
 int
-_p11_buffer_append (buffer_t *buffer,
+_p11_buffer_append (Buffer *buffer,
                     const unsigned char *val,
                     size_t len)
 {
@@ -243,7 +243,7 @@ _p11_buffer_append (buffer_t *buffer,
 }
 
 int
-_p11_buffer_add_byte (buffer_t *buffer,
+_p11_buffer_add_byte (Buffer *buffer,
                       unsigned char val)
 {
 	if (!_p11_buffer_reserve (buffer, buffer->len + 1))
@@ -254,7 +254,7 @@ _p11_buffer_add_byte (buffer_t *buffer,
 }
 
 int
-_p11_buffer_get_byte (buffer_t *buffer,
+_p11_buffer_get_byte (Buffer *buffer,
                       size_t offset,
                       size_t *next_offset,
                       unsigned char *val)
@@ -288,7 +288,7 @@ _p11_buffer_decode_uint16 (unsigned char* buf)
 }
 
 int
-_p11_buffer_add_uint16 (buffer_t *buffer,
+_p11_buffer_add_uint16 (Buffer *buffer,
                         uint16_t val)
 {
 	if (!_p11_buffer_reserve (buffer, buffer->len + 2))
@@ -299,7 +299,7 @@ _p11_buffer_add_uint16 (buffer_t *buffer,
 }
 
 int
-_p11_buffer_set_uint16 (buffer_t *buffer,
+_p11_buffer_set_uint16 (Buffer *buffer,
                         size_t offset,
                         uint16_t val)
 {
@@ -314,7 +314,7 @@ _p11_buffer_set_uint16 (buffer_t *buffer,
 }
 
 int
-_p11_buffer_get_uint16 (buffer_t *buffer,
+_p11_buffer_get_uint16 (Buffer *buffer,
                         size_t offset,
                         size_t *next_offset,
                         uint16_t *val)
@@ -350,7 +350,7 @@ _p11_buffer_decode_uint32 (unsigned char* ptr)
 }
 
 int
-_p11_buffer_add_uint32 (buffer_t *buffer,
+_p11_buffer_add_uint32 (Buffer *buffer,
                         uint32_t val)
 {
 	if (!_p11_buffer_reserve (buffer, buffer->len + 4))
@@ -361,7 +361,7 @@ _p11_buffer_add_uint32 (buffer_t *buffer,
 }
 
 int
-_p11_buffer_set_uint32 (buffer_t *buffer,
+_p11_buffer_set_uint32 (Buffer *buffer,
                         size_t offset,
                         uint32_t val)
 {
@@ -376,7 +376,7 @@ _p11_buffer_set_uint32 (buffer_t *buffer,
 }
 
 int
-_p11_buffer_get_uint32 (buffer_t *buffer,
+_p11_buffer_get_uint32 (Buffer *buffer,
                         size_t offset,
                         size_t *next_offset,
                         uint32_t *val)
@@ -395,7 +395,7 @@ _p11_buffer_get_uint32 (buffer_t *buffer,
 }
 
 int
-_p11_buffer_add_uint64 (buffer_t *buffer,
+_p11_buffer_add_uint64 (Buffer *buffer,
                         uint64_t val)
 {
 	if (!_p11_buffer_add_uint32 (buffer, ((val >> 32) & 0xffffffff)))
@@ -404,7 +404,7 @@ _p11_buffer_add_uint64 (buffer_t *buffer,
 }
 
 int
-_p11_buffer_get_uint64 (buffer_t *buffer,
+_p11_buffer_get_uint64 (Buffer *buffer,
                         size_t offset,
                         size_t *next_offset,
                         uint64_t *val)
@@ -422,7 +422,7 @@ _p11_buffer_get_uint64 (buffer_t *buffer,
 }
 
 int
-_p11_buffer_add_byte_array (buffer_t *buffer,
+_p11_buffer_add_byte_array (Buffer *buffer,
                             const unsigned char *val,
                             size_t len)
 {
@@ -438,7 +438,7 @@ _p11_buffer_add_byte_array (buffer_t *buffer,
 }
 
 int
-_p11_buffer_get_byte_array (buffer_t *buffer,
+_p11_buffer_get_byte_array (Buffer *buffer,
                             size_t offset,
                             size_t *next_offset,
                             const unsigned char **val,
@@ -476,7 +476,7 @@ _p11_buffer_get_byte_array (buffer_t *buffer,
 }
 
 int
-_p11_buffer_add_string (buffer_t *buffer,
+_p11_buffer_add_string (Buffer *buffer,
                         const char *str)
 {
 	if (str == NULL) {
@@ -492,11 +492,11 @@ _p11_buffer_add_string (buffer_t *buffer,
 }
 
 int
-_p11_buffer_get_string (buffer_t *buffer,
+_p11_buffer_get_string (Buffer *buffer,
                         size_t offset,
                         size_t *next_offset,
                         char **str_ret,
-                        buffer_allocator allocator)
+                        BufferAllocator allocator)
 {
 	uint32_t len;
 
@@ -539,7 +539,7 @@ _p11_buffer_get_string (buffer_t *buffer,
 }
 
 int
-_p11_buffer_add_stringv (buffer_t *buffer,
+_p11_buffer_add_stringv (Buffer *buffer,
                          const char** strv)
 {
 	const char **v;
@@ -564,11 +564,11 @@ _p11_buffer_add_stringv (buffer_t *buffer,
 }
 
 int
-_p11_buffer_get_stringv (buffer_t *buffer,
+_p11_buffer_get_stringv (Buffer *buffer,
                          size_t offset,
                          size_t *next_offset,
                          char ***strv_ret,
-                         buffer_allocator allocator)
+                         BufferAllocator allocator)
 {
 	uint32_t n, i, j;
 	size_t len;

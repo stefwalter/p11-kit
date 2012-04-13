@@ -83,6 +83,23 @@ if test "$os_unix" = "yes"; then
 	AC_CHECK_DECLS([__progname])
 	AC_LINK_IFELSE([AC_LANG_SOURCE([extern char *__progname; void main() { }])],
 		[AC_DEFINE(HAVE___PROGNAME, [1], [Whether __progname available])])
+
+	AC_MSG_CHECKING(for struct cmsgcred)
+	AC_TRY_COMPILE([
+		#include <sys/types.h>
+		#include <sys/socket.h>
+	],[
+		struct cmsgcred cred;
+		cred.cmcred_pid = 0;
+	], have_struct_cmsgcred=yes, have_struct_cmsgcred=no)
+	AC_MSG_RESULT($have_struct_cmsgcred)
+
+	if test x$have_struct_cmsgcred = xyes; then
+		AC_DEFINE(HAVE_CMSGCRED, 1, [Have cmsgcred structure])
+	fi
+
+	AC_CHECK_FUNCS(getpeerucred, AC_DEFINE(HAVE_GETPEERUCRED, 1, [Have getpeerucred]))
+	AC_CHECK_FUNCS(getpeereid, AC_DEFINE(HAVE_GETPEEREID, 1, [Have getpeereid function]))
 fi
 
 AC_CHECK_LIB(intl, dgettext)

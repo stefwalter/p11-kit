@@ -23,51 +23,31 @@
 
 #include "config.h"
 
-#include "rpc-private.h"
+#include "private.h"
+#include "rpc-message.h"
 
+#include <assert.h>
 #include <string.h>
 
-#ifdef G_DISABLE_ASSERT
-#define assert(x)
-#else
-#include <assert.h>
-#endif
-
-RpcMessage*
-_p11_rpc_message_new (buffer_allocator allocator)
+void
+_p11_rpc_message_init (RpcMessage *msg,
+                       BufferAllocator allocator)
 {
-	RpcMessage *msg;
+	assert (allocator != NULL);
 
-	assert (allocator);
-
-	msg = (RpcMessage*) (allocator)(NULL, sizeof (RpcMessage));
-	if (!msg)
-		return NULL;
 	memset (msg, 0, sizeof (*msg));
 
-	if (!_p11_buffer_init_full (&msg->buffer, 64, allocator)) {
-		(allocator) (msg, 0); /* Frees allocation */
-		return NULL;
-	}
-
-	_p11_rpc_message_reset (msg);
-
-	return msg;
+	if (_p11_buffer_init_full (&msg->buffer, 64, allocator))
+		_p11_rpc_message_reset (msg);
 }
 
 void
-_p11_rpc_message_free (RpcMessage *msg)
+_p11_rpc_message_clear (RpcMessage *msg)
 {
-	buffer_allocator allocator;
+	assert (msg != NULL);
+	assert (msg->buffer.allocator);
 
-	if (msg) {
-		assert (msg->buffer.allocator);
-		allocator = msg->buffer.allocator;
-		_p11_buffer_uninit (&msg->buffer);
-
-		/* frees data buffer */
-		(allocator) (msg, 0);
-	}
+	_p11_buffer_uninit (&msg->buffer);
 }
 
 void
@@ -85,7 +65,9 @@ _p11_rpc_message_reset (RpcMessage *msg)
 }
 
 int
-_p11_rpc_message_prep (RpcMessage *msg, int call_id, RpcMessageType type)
+_p11_rpc_message_prep (RpcMessage *msg,
+                       int call_id,
+                       RpcMessageType type)
 {
 	int len;
 
@@ -133,7 +115,7 @@ _p11_rpc_message_parse (RpcMessage *msg, RpcMessageType type)
 
 	/* Pull out the call identifier */
 	if (!_p11_buffer_get_uint32 (&msg->buffer, msg->parsed, &(msg->parsed), &call_id)) {
-		_p11_rpc_warn ("invalid message: couldn't read call identifier");
+		_p11_message ("invalid message: couldn't read call identifier");
 		return 0;
 	}
 
@@ -142,7 +124,7 @@ _p11_rpc_message_parse (RpcMessage *msg, RpcMessageType type)
 	/* If it's an error code then no more processing */
 	if (call_id == RPC_CALL_ERROR) {
 		if (type == RPC_REQUEST) {
-			_p11_rpc_warn ("invalid message: error code in request");
+			_p11_message ("invalid message: error code in request");
 			return 0;
 		}
 
@@ -151,7 +133,7 @@ _p11_rpc_message_parse (RpcMessage *msg, RpcMessageType type)
 
 	/* The call id and signature */
 	if (call_id <= 0 || call_id >= RPC_CALL_MAX) {
-		_p11_rpc_warn ("invalid message: bad call id: %d", call_id);
+		_p11_message ("invalid message: bad call id: %d", call_id);
 		return 0;
 	}
 	if (type == RPC_REQUEST)
@@ -166,42 +148,16 @@ _p11_rpc_message_parse (RpcMessage *msg, RpcMessageType type)
 
 	/* Verify the incoming signature */
 	if (!_p11_buffer_get_byte_array (&msg->buffer, msg->parsed, &(msg->parsed), &val, &len)) {
-		_p11_rpc_warn ("invalid message: couldn't read signature");
+		_p11_message ("invalid message: couldn't read signature");
 		return 0;
 	}
 
 	if ((strlen (msg->signature) != len) || (memcmp (val, msg->signature, len) != 0)) {
-		_p11_rpc_warn ("invalid message: signature doesn't match");
+		_p11_message ("invalid message: signature doesn't match");
 		return 0;
 	}
 
 	return 1;
-}
-
-int
-_p11_rpc_message_equals (RpcMessage *m1, RpcMessage *m2)
-{
-	assert (m1 && m2);
-
-	/* Any errors and messages are never equal */
-	if (_p11_buffer_has_error (&m1->buffer) ||
-	    _p11_buffer_has_error (&m2->buffer))
-		return 0;
-
-	/* Calls and signatures must be identical */
-	if (m1->call_id != m2->call_id)
-		return 0;
-	if (m1->call_type != m2->call_type)
-		return 0;
-	if (m1->signature && m2->signature) {
-		if (strcmp (m1->signature, m2->signature) != 0)
-			return 0;
-	} else if (m1->signature != m2->signature) {
-		return 0;
-	}
-
-	/* Data in buffer must be identical */
-	return _p11_buffer_equal (&m1->buffer, &m2->buffer);
 }
 
 int
@@ -438,7 +394,7 @@ _p11_rpc_message_read_space_string (RpcMessage *msg, CK_UTF8CHAR* buffer, CK_ULO
 		return 0;
 
 	if (n_data != length) {
-		_p11_rpc_warn ("invalid length space padded string received: %d != %d", length, n_data);
+		_p11_message ("invalid length space padded string received: %d != %d", length, n_data);
 		return 0;
 	}
 

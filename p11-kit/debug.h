@@ -43,6 +43,7 @@ typedef enum {
 	DEBUG_CONF = 1 << 2,
 	DEBUG_URI = 1 << 3,
 	DEBUG_PROXY = 1 << 4,
+	DEBUG_RPC = 1 << 5,
 } DebugFlags;
 
 extern int        _p11_debug_current_flags;

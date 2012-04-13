@@ -21,20 +21,14 @@
    Author: Stef Walter <stef@memberwebs.com>
 */
 
-#ifndef _RPC_PRIVATE_H
-#define _RPC_PRIVATE_H
+#ifndef _RPC_MESSAGE_H
+#define _RPC_MESSAGE_H
 
 #include <stdlib.h>
 #include <stdarg.h>
 
 #include "buffer.h"
-
 #include "pkcs11.h"
-
-
-/* Whether to print debug output or not */
-#define DEBUG_OUTPUT 0
-
 
 /* The calls, must be in sync with array below */
 enum {
@@ -210,11 +204,9 @@ static const RpcCall rpc_calls[] = {
 #endif
 
 #define RPC_HANDSHAKE \
-	((unsigned char*)"PRIVATE-GNOME-KEYRING-PKCS11-PROTOCOL-V-1")
+	((unsigned char *)"PRIVATE-GNOME-KEYRING-PKCS11-PROTOCOL-V-1")
 #define RPC_HANDSHAKE_LEN \
 	(strlen ((char *)RPC_HANDSHAKE))
-
-#define GKM_RPC_SOCKET_EXT 	"pkcs11"
 
 typedef enum _RpcMessageType {
 	RPC_REQUEST = 1,
@@ -225,20 +217,18 @@ typedef struct _RpcMessage {
 	int call_id;
 	RpcMessageType call_type;
 	const char *signature;
-	buffer_t buffer;
+	Buffer buffer;
 
 	size_t parsed;
 	const char *sigverify;
 } RpcMessage;
 
-RpcMessage *             _p11_rpc_message_new                     (buffer_allocator allocator);
+void                     _p11_rpc_message_init                    (RpcMessage *msg,
+                                                                   BufferAllocator allocator);
 
-void                     _p11_rpc_message_free                    (RpcMessage *msg);
+void                     _p11_rpc_message_clear                   (RpcMessage *msg);
 
 void                     _p11_rpc_message_reset                   (RpcMessage *msg);
-
-int                      _p11_rpc_message_equals                  (RpcMessage *m1,
-                                                                   RpcMessage *m2);
 
 #define                  _p11_rpc_message_is_verified(msg)        (!(msg)->sigverify || (msg)->sigverify[0] == 0)
 
@@ -305,20 +295,7 @@ int                      _p11_rpc_message_read_space_string       (RpcMessage *m
 int                      _p11_rpc_message_read_version            (RpcMessage *msg,
                                                                    CK_VERSION* version);
 
-void                     _p11_rpc_log                             (const char *line);
-
-void                     _p11_rpc_warn                            (const char* msg,
-                                                                   ...);
-
-void                     _p11_rpc_debug                           (const char* msg,
-                                                                   ...);
-
-#ifdef G_DISABLE_ASSERT
-#define assert(x)
-#else
-#include <assert.h>
-#endif
-
+#if 0
 /*
  * PKCS#11 mechanism parameters are not easy to serialize. They're
  * completely different for so many mechanisms, they contain
@@ -336,9 +313,6 @@ void   _p11_rpc_mechanism_list_purge          (CK_MECHANISM_TYPE_PTR mechs,
                                                CK_ULONG_PTR n_mechs);
 int    _p11_rpc_mechanism_has_sane_parameters (CK_MECHANISM_TYPE type);
 int    _p11_rpc_mechanism_has_no_parameters   (CK_MECHANISM_TYPE mech);
+#endif
 
-/* TODO: Figure out how to initialize and call */
-
-CK_RV rpc_p11_C_GetFunctionList (CK_FUNCTION_LIST_PTR_PTR list);
-
-#endif /* _RPC_PRIVATE_H */
+#endif /* _RPC_MESSAGE_H */

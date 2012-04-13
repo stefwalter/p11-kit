@@ -25,7 +25,11 @@ MODULE_SRCS = \
 	private.h \
 	ptr-array.c ptr-array.h \
 	messages.c \
-	rpc-private.h rpc-module.c rpc-message.c rpc-util.c \
+	rpc-client.c rpc-client.h \
+	rpc-mechanism.c rpc-mechanism.h \
+	rpc-message.c rpc-message.h \
+	rpc-socket.c rpc-socket.h \
+	unix-credentials.c unix-credentials.h \
 	uri.c \
 	util.c util.h \
 	$(top_srcdir)/common/compat.c \
