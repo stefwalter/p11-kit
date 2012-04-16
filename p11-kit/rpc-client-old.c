@@ -1,3 +1,8 @@
+	if (!_p11_rpc_socket_is_open (module->socket))
+		return CKR_DEVICE_REMOVED;
+
+	_p11_rpc_socket_ref (module->socket);
+
 /* -*- Mode: C; indent-tabs-mode: t; c-basic-offset: 8; tab-width: 8 -*- */
 /* client.c - a PKCS#11 module which communicates with another process
 
@@ -30,11 +35,12 @@
 #include "rpc-client.h"
 #include "rpc-mechanism.h"
 #include "rpc-message.h"
+#include "rpc-socket.h"
+#include "unix-credentials.h"
 
 #include <assert.h>
 #include <pthread.h>
 #include <string.h>
-#include <unistd.h>
 
 /* The error used by us when parsing of rpc message fails */
 #define PARSE_ERROR   CKR_DEVICE_ERROR
@@ -46,7 +52,8 @@ typedef struct {
 	int check;
 	CK_FUNCTION_LIST_PTR function_list;
 	pthread_mutex_t mutex;
-	RpcClientVtable *vtable;
+	const RpcClientVtable *vtable;
+	RpcSocket *socket;
 	pid_t initialized_pid;
 } RpcModule;
 
@@ -54,9 +61,9 @@ typedef struct {
 	{ id, (CK_FUNCTION_LIST_PTR)function_list, PTHREAD_MUTEX_INITIALIZER, NULL, 0 }
 
 /* Allocator for call session buffers */
-static void *
-log_allocator (void *pointer,
-               size_t size)
+static void*
+call_allocator (void *pointer,
+                size_t size)
 {
 	void *result = realloc (pointer, (size_t)size);
 	if (!result && size)
@@ -72,10 +79,14 @@ call_prepare (RpcModule *module,
 	assert (module != NULL);
 	assert (msg != NULL);
 
-	if (module->initialized_pid == 0)
+	if (!module->socket)
 		return CKR_CRYPTOKI_NOT_INITIALIZED;
 
-	_p11_rpc_message_init (msg, log_allocator);
+	if (!_p11_rpc_socket_is_open (module->socket))
+		return CKR_DEVICE_REMOVED;
+
+	_p11_rpc_socket_ref (module->socket);
+	_p11_rpc_message_init (msg, call_allocator);
 
 	/* Put in the Call ID and signature */
 	if (!_p11_rpc_message_prep (msg, call_id, RPC_REQUEST))
@@ -91,9 +102,6 @@ call_run (RpcModule *module,
 {
 	CK_RV ret = CKR_OK;
 	CK_ULONG ckerr;
-	unsigned char *data;
-	size_t n_data;
-
 	int call_id;
 
 	assert (module != NULL);
@@ -109,12 +117,8 @@ call_run (RpcModule *module,
 	assert (_p11_rpc_message_is_verified (msg));
 	call_id = msg->call_id;
 
-	/* Do the transport send and receive */
-	assert (module->vtable->transport != NULL);
-	data = _p11_buffer_uninit_steal (&msg->buffer, &n_data);
-	ret = (module->vtable->transport) (module->vtable, &data, &n_data);
-	_p11_buffer_init_allocated (&msg->buffer, data, n_data, log_allocator);
-
+	/* Do the dialog with daemon */
+	ret = _p11_rpc_socket_send_recv (module->socket, msg);
 	if (ret != CKR_OK)
 		return ret;
 
@@ -165,6 +169,7 @@ call_done (RpcModule *module,
 		}
 	}
 
+	_p11_rpc_socket_unref (module->socket);
 	_p11_rpc_message_clear (msg);
 	return ret;
 }
@@ -667,6 +672,7 @@ rpc_C_Initialize (RpcModule *module,
                   CK_VOID_PTR init_args)
 {
 	CK_C_INITIALIZE_ARGS_PTR args = NULL;
+	RpcSocket *socket = NULL;
 	void *reserved = NULL;
 	CK_RV ret = CKR_OK;
 	RpcMessage msg;
@@ -707,7 +713,7 @@ rpc_C_Initialize (RpcModule *module,
 	pthread_mutex_lock (&module->mutex);
 
 	pid = getpid ();
-	if (module->initialized_pid != 0) {
+	if (module->socket == NULL) {
 		/* This process has called C_Initialize already */
 		if (pid == module->initialized_pid) {
 			_p11_message ("C_Initialize called twice for same process");
@@ -717,10 +723,17 @@ rpc_C_Initialize (RpcModule *module,
 	}
 
 	/* Call out to initialize client callback */
-	assert (module->vtable->initialize);
-	ret = (module->vtable->initialize) (module->vtable->data, reserved);
-	if (ret != CKR_OK)
+	if (module->vtable->initialize) {
+		ret = (module->vtable->initialize) (module->vtable->data, reserved, &socket);
+		if (ret != CKR_OK)
+			goto done;
+		module->socket = socket;
+	}
+
+	if (module->socket == NULL) {
+		ret = CKR_DEVICE_ERROR;
 		goto done;
+	}
 
 	/* If we don't have read and write fds now, then initialize other side */
 	ret = call_prepare (module, &msg, RPC_CALL_C_Initialize);
@@ -733,11 +746,15 @@ rpc_C_Initialize (RpcModule *module,
 
 done:
 	/* Mark us as officially initialized */
-	if (ret == CKR_OK)
+	if (ret == CKR_OK) {
 		module->initialized_pid = pid;
 
-	else if (ret != CKR_CRYPTOKI_ALREADY_INITIALIZED)
+	} else if (ret != CKR_CRYPTOKI_ALREADY_INITIALIZED) {
+		if (module->socket)
+			_p11_rpc_socket_unref (module->socket);
+		module->socket = NULL;
 		module->initialized_pid = 0;
+	}
 
 	pthread_mutex_unlock (&module->mutex);
 
@@ -753,7 +770,7 @@ rpc_C_Finalize (RpcModule *module,
 	RpcMessage msg;
 
 	_p11_debug ("C_Finalize: enter");
-	return_val_if_fail (module->initialized_pid == 0, CKR_CRYPTOKI_NOT_INITIALIZED);
+	return_val_if_fail (module->socket == NULL, CKR_CRYPTOKI_NOT_INITIALIZED);
 	return_val_if_fail (!reserved, CKR_ARGUMENTS_BAD);
 
 	pthread_mutex_lock (&module->mutex);
@@ -765,8 +782,9 @@ rpc_C_Finalize (RpcModule *module,
 	if (ret != CKR_OK)
 		_p11_message ("finalizing the daemon returned an error: %d", ret);
 
-	assert (module->vtable->finalize);
-	(module->vtable->finalize) (module->vtable, reserved);
+	/* This should stop all other calls in */
+	_p11_rpc_socket_unref (module->socket);
+	module->socket = NULL;
 	module->initialized_pid = 0;
 
 	pthread_mutex_unlock (&module->mutex);
@@ -2018,7 +2036,7 @@ static RpcModule *RPC_MODULES[] = {
 	sizeof (RPC_MODULES) / sizeof (RPC_MODULES[0])
 
 CK_FUNCTION_LIST_PTR
-_p11_rpc_client_register (RpcClientVtable *vtable)
+_p11_rpc_client_register (const RpcClientVtable *vtable)
 {
 	static pthread_mutex_t register_mutex = PTHREAD_MUTEX_INITIALIZER;
 	CK_FUNCTION_LIST_PTR function_list = NULL;

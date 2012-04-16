@@ -1,4 +1,5 @@
 /*
+ * Copyright (c) 2005 Stefan Walter
  * Copyright (c) 2011 Collabora Ltd.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -29,59 +30,44 @@
  * THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH
  * DAMAGE.
  *
- * Author: Stef Walter <stefw@collabora.co.uk>
+ *
+ * CONTRIBUTORS
+ *  Stef Walter <stef@memberwebs.com>
  */
-
-#ifndef __COMPAT_H__
-#define __COMPAT_H__
 
 #include "config.h"
 
-#if !defined(__cplusplus) && (__GNUC__ > 2)
-#define GNUC_PRINTF(x, y) __attribute__((__format__(__printf__, x, y)))
-#else
-#define GNUC_PRINTF(x, y)
-#endif
+typedef void (* TpoolFunc) (void *data);
 
-#if __GNUC__ >= 4
-#define GNUC_NULL_TERMINATED __attribute__((__sentinel__))
-#else
-#define GNUC_NULL_TERMINATED
-#endif
+typedef struct _TpoolTask {
+	TpoolFunc func;
+	void *data;
+	struct _TpoolTask *next;
+} TpoolTask;
 
-#ifndef HAVE_GETPROGNAME
-const char * getprogname (void);
-#endif
+static pthread_mutex_t pool_mutex;
+static int threads_waiting = 0;
+static int threads_idle = 0;
+static TpoolTask *tasks_waiting = NULL;
 
-#ifndef HAVE_DAEMON
-int daemon (int nochdir, int noclose);
-#endif
+int
+tpool_init (int fd)
+{
+	int ret;
 
-#ifdef HAVE_ERR_H
-#include <err.h>
+	ret = pthread_mutex_init (&pool_mutex, NULL);
+	if (ret != 0) {
+		errno = ret;
+		return -1;
+	}
 
-#else /* !HAVE_ERR_H */
+	xxxxxxx;
+}
 
-#include <stdarg.h>
-void err_set_file (void *fp);
-void err_set_exit (void (*ef)(int));
-void err (int eval, const char *fmt, ...) GNUC_PRINTF (2, 3);
-void verr (int eval, const char *fmt, va_list ap);
-void errc (int eval, int code, const char *fmt, ...) GNUC_PRINTF (3, 4);
-void verrc (int eval, int code, const char *fmt, va_list ap);
-void errx (int eval, const char *fmt, ...) GNUC_PRINTF (2, 3);
-void verrx (int eval, const char *fmt, va_list ap);
-void warn (const char *fmt, ...) GNUC_PRINTF (1, 2);
-void vwarn (const char *fmt, va_list ap);
-void warnc (int code, const char *fmt, ...) GNUC_PRINTF (2, 3);
-void vwarnc (int code, const char *fmt, va_list ap);
-void warnx (const char *fmt, ...) GNUC_PRINTF (1, 2);
-void vwarnx (const char *fmt, va_list ap);
+static int
+tpool_run (xxx)
+{
+	pthread_mutex_lock (&pool_mutex);
 
-#endif /* !HAVE_ERR_H */
-
-#ifdef	HAVE_ERRNO_H
-#include <errno.h>
-#endif	/* HAVE_ERRNO_H */
-
-#endif /* __COMPAT_H__ */
+	pthread_mutex_unlock (&pool_mutex);
+}

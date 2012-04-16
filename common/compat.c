@@ -273,3 +273,58 @@ vwarnx (const char *fmt,
 }
 
 #endif /* HAVE_ERR_H */
+
+#ifndef HAVE_DAEMON
+
+#include <sys/types.h>
+#include <errno.h>
+#include <fcntl.h>
+#include <signal.h>
+#include <stdlib.h>
+#include <unistd.h>
+
+int
+daemon (int nochdir,
+        int noclose)
+{
+	struct sigaction osa, sa;
+	int oerrno, fd, osa_ok;
+	pid_t newgrp;
+
+	/* A SIGHUP may be thrown when the parent exits below. */
+	sigemptyset (&sa.sa_mask);
+	sa.sa_handler = SIG_IGN;
+	sa.sa_flags = 0;
+	osa_ok = sigaction (SIGHUP, &sa, &osa);
+
+	switch (fork ()) {
+	case -1:
+		return -1;
+	case 0:
+		break;
+	default:
+		_exit (0);
+	}
+
+	newgrp = setsid ();
+	oerrno = errno;
+	if (osa_ok != -1)
+		sigaction (SIGHUP, &osa, NULL);
+	if (newgrp == -1) {
+		errno = oerrno;
+		return -1;
+	}
+	if (!nochdir)
+		chdir ("/");
+	if (!noclose && (fd = open ("/dev/null", O_RDWR, 0)) != -1) {
+		dup2 (fd, STDIN_FILENO);
+		dup2 (fd, STDOUT_FILENO);
+		dup2 (fd, STDERR_FILENO);
+		if (fd > 2)
+			close (fd);
+	}
+
+	return 0;
+}
+
+#endif /* HAVE_DAEMON */

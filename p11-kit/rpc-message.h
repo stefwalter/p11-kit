@@ -218,9 +218,9 @@ typedef struct _RpcMessage {
 	RpcMessageType call_type;
 	const char *signature;
 	Buffer buffer;
-
 	size_t parsed;
 	const char *sigverify;
+	void *extra;
 } RpcMessage;
 
 void                     _p11_rpc_message_init                    (RpcMessage *msg,
@@ -233,6 +233,9 @@ void                     _p11_rpc_message_reset                   (RpcMessage *m
 #define                  _p11_rpc_message_is_verified(msg)        (!(msg)->sigverify || (msg)->sigverify[0] == 0)
 
 #define                  _p11_rpc_message_buffer_error(msg)       (_p11_buffer_has_error (&(msg)->buffer))
+
+void *                   _p11_rpc_message_alloc_extra             (RpcMessage *msg,
+                                                                   size_t length);
 
 int                      _p11_rpc_message_prep                    (RpcMessage *msg,
                                                                    int call_id,
@@ -294,25 +297,5 @@ int                      _p11_rpc_message_read_space_string       (RpcMessage *m
 
 int                      _p11_rpc_message_read_version            (RpcMessage *msg,
                                                                    CK_VERSION* version);
-
-#if 0
-/*
- * PKCS#11 mechanism parameters are not easy to serialize. They're
- * completely different for so many mechanisms, they contain
- * pointers to arbitrary memory, and many callers don't initialize
- * them completely or properly.
- *
- * We only support certain mechanisms.
- *
- * Also callers do yucky things like leaving parts of the structure
- * pointing to garbage if they don't think it's going to be used.
- */
-
-int    _p11_rpc_mechanism_is_supported        (CK_MECHANISM_TYPE mech);
-void   _p11_rpc_mechanism_list_purge          (CK_MECHANISM_TYPE_PTR mechs,
-                                               CK_ULONG_PTR n_mechs);
-int    _p11_rpc_mechanism_has_sane_parameters (CK_MECHANISM_TYPE type);
-int    _p11_rpc_mechanism_has_no_parameters   (CK_MECHANISM_TYPE mech);
-#endif
 
 #endif /* _RPC_MESSAGE_H */

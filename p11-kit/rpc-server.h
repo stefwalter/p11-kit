@@ -20,26 +20,13 @@
    Author: Stef Walter <stefw@gnome.org>
 */
 
-#ifndef __RPC_CLIENT_H__
-#define __RPC_CLIENT_H__
+#ifndef __RPC_SERVER_H__
+#define __RPC_SERVER_H__
 
 #include "pkcs11.h"
 
-typedef struct _RpcClientVtable RpcClientVtable;
-struct _RpcClientVtable {
-	void *data;
+int       _p11_rpc_server_perform      (CK_FUNCTION_LIST_PTR module,
+                                        unsigned char **data,
+                                        size_t *n_data);
 
-	CK_RV       (* initialize)    (RpcClientVtable *vtable,
-	                               void *init_reserved);
-
-	CK_RV       (* transport)     (RpcClientVtable *vtable,
-	                               unsigned char **data,
-	                               size_t *length);
-
-	void        (* finalize)      (RpcClientVtable *vtable,
-	                               void *fini_reserved);
-};
-
-CK_FUNCTION_LIST_PTR   _p11_rpc_client_register    (RpcClientVtable *vtable);
-
-#endif /* __RPC_CLIENT_H__ */
+#endif /* __RPC_SERVER_H__ */

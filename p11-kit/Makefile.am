@@ -28,6 +28,7 @@ MODULE_SRCS = \
 	rpc-client.c rpc-client.h \
 	rpc-mechanism.c rpc-mechanism.h \
 	rpc-message.c rpc-message.h \
+	rpc-server.c rpc-server.h \
 	rpc-socket.c rpc-socket.h \
 	unix-credentials.c unix-credentials.h \
 	uri.c \

@@ -44,10 +44,50 @@ _p11_rpc_message_init (RpcMessage *msg,
 void
 _p11_rpc_message_clear (RpcMessage *msg)
 {
+	void *allocated;
+	void **data;
+
 	assert (msg != NULL);
 	assert (msg->buffer.allocator);
 
 	_p11_buffer_uninit (&msg->buffer);
+
+	/* Free up the extra allocated memory */
+	allocated = msg->extra;
+	while (allocated != NULL) {
+		data = (void **)allocated;
+
+		/* Pointer to the next allocation */
+		allocated = *data;
+		(msg->buffer.allocator) (data, 0);
+	}
+	msg->extra = NULL;
+}
+
+void *
+_p11_rpc_message_alloc_extra (RpcMessage *msg,
+                              size_t length)
+{
+	void **data;
+
+	assert (msg != NULL);
+
+	if (length > 0x7fffffff)
+		return NULL;
+
+	data = (msg->buffer.allocator) (NULL, sizeof (void *) + length);
+	if (data == NULL)
+		return NULL;
+
+	/* Munch up the memory to help catch bugs */
+	memset (data, 0xff, sizeof (void *) + length);
+
+	/* Store pointer to next allocated block at beginning */
+	*data = msg->extra;
+	msg->extra = data;
+
+	/* Data starts after first pointer */
+	return (void *)(data + 1);
 }
 
 void
