@@ -57,6 +57,7 @@
 #include <sys/socket.h>
 #include <sys/wait.h>
 #include <sys/un.h>
+#include <netdb.h>
 #include <signal.h>
 #include <unistd.h>
 #endif
@@ -543,14 +544,16 @@ struct _p11_rpc_transport {
 };
 
 static void
-on_rpc_disconnect (p11_rpc_client_vtable *vtable,
-                   void *init_reserved)
+rpc_transport_disconnect (p11_rpc_client_vtable *vtable,
+                          void *init_reserved)
 {
 	p11_rpc_transport *rpc = (p11_rpc_transport *)vtable;
 
-	if (rpc->socket)
+	if (rpc->socket) {
+		rpc_socket_close (rpc->socket);
 		rpc_socket_unref (rpc->socket);
-	rpc->socket = NULL;
+		rpc->socket = NULL;
+	}
 }
 
 static bool
@@ -574,9 +577,9 @@ rpc_transport_uninit (p11_rpc_transport *rpc)
 }
 
 static CK_RV
-on_rpc_transport (p11_rpc_client_vtable *vtable,
-                  p11_buffer *request,
-                  p11_buffer *response)
+rpc_transport_buffer (p11_rpc_client_vtable *vtable,
+                      p11_buffer *request,
+                      p11_buffer *response)
 {
 	p11_rpc_transport *rpc = (p11_rpc_transport *)vtable;
 	CK_RV rv = CKR_OK;
@@ -633,7 +636,7 @@ typedef struct {
 } rpc_exec;
 
 static void
-wait_or_terminate (pid_t pid)
+rpc_exec_wait_or_terminate (pid_t pid)
 {
 	bool terminated = false;
 	int status;
@@ -673,8 +676,8 @@ wait_or_terminate (pid_t pid)
 }
 
 static void
-on_rpc_exec_disconnect (p11_rpc_client_vtable *vtable,
-                        void *fini_reserved)
+rpc_exec_disconnect (p11_rpc_client_vtable *vtable,
+                     void *fini_reserved)
 {
 	rpc_exec *rex = (rpc_exec *)vtable;
 
@@ -682,11 +685,11 @@ on_rpc_exec_disconnect (p11_rpc_client_vtable *vtable,
 		rpc_socket_close (rex->base.socket);
 
 	if (rex->pid)
-		wait_or_terminate (rex->pid);
+		rpc_exec_wait_or_terminate (rex->pid);
 	rex->pid = 0;
 
 	/* Do the common disconnect stuff */
-	on_rpc_disconnect (vtable, fini_reserved);
+	rpc_transport_disconnect (vtable, fini_reserved);
 }
 
 static int
@@ -700,8 +703,8 @@ set_cloexec_on_fd (void *data,
 }
 
 static CK_RV
-on_rpc_exec_connect (p11_rpc_client_vtable *vtable,
-                     void *init_reserved)
+rpc_exec_connect (p11_rpc_client_vtable *vtable,
+                  void *init_reserved)
 {
 	rpc_exec *rex = (rpc_exec *)vtable;
 	pid_t pid;
@@ -763,7 +766,7 @@ static void
 rpc_exec_free (void *data)
 {
 	rpc_exec *rex = data;
-	on_rpc_exec_disconnect (data, NULL);
+	rpc_exec_disconnect (data, NULL);
 	rpc_transport_uninit (&rex->base);
 	p11_array_free (rex->argv);
 	free (rex);
@@ -799,13 +802,202 @@ rpc_exec_init (const char *remote,
 	p11_array_push (argv, NULL);
 	rex->argv = argv;
 
-	rex->base.vtable.connect = on_rpc_exec_connect;
-	rex->base.vtable.disconnect = on_rpc_exec_disconnect;
-	rex->base.vtable.transport = on_rpc_transport;
+	rex->base.vtable.connect = rpc_exec_connect;
+	rex->base.vtable.disconnect = rpc_exec_disconnect;
+	rex->base.vtable.transport = rpc_transport_buffer;
 	rpc_transport_init (&rex->base, name, rpc_exec_free);
 
 	p11_debug ("initialized rpc exec: %s", remote);
 	return &rex->base;
+}
+
+typedef struct {
+	p11_rpc_transport base;
+	char *remote;
+	struct addrinfo hints;
+} rpc_inet;
+
+static CK_RV
+rpc_inet_connect (p11_rpc_client_vtable *vtable,
+                  void *init_reserved)
+{
+	rpc_inet *rin = (rpc_inet *)vtable;
+	struct addrinfo *res, *ai;
+	char *port;
+	char *node;
+	int sock;
+	int errn;
+	int ret;
+
+	p11_debug ("connecting to rpc transport: %s", rin->remote);
+
+	node = rin->remote;
+
+	/*
+	 * IPv6 address format was just one of the awkward things to
+	 * have come out of the 90's ... have to handle is specially
+	 */
+	if (node[0] == '[') {
+		port = strchr (node, ']');
+		if (port == NULL || port[1] != ':') {
+			p11_message ("invalid ipv6 address and port: %s", rin->remote);
+			return CKR_DEVICE_ERROR;
+		}
+		node[0] = '\0';
+		node += 1;
+		port[0] = '\0';
+		port += 2;
+		rin->hints.ai_family = AF_INET6;
+		rin->hints.ai_flags |= AI_NUMERICHOST;
+
+	/* Either an IPv4 address or a host name */
+	} else {
+		port = strchr (node, ':');
+		if (port == NULL) {
+			p11_message ("invalid host/address and port: %s", rin->remote);
+			return CKR_DEVICE_ERROR;
+		}
+		port[0] = '\0';
+		port += 1;
+	}
+
+	ret = getaddrinfo (node, port, &rin->hints, &res);
+	if (ret != 0) {
+		p11_message ("couldn't resolve %s at port %s: %s",
+		             node, port, gai_strerror (ret));
+		return CKR_DEVICE_ERROR;
+	}
+
+	sock = -1;
+	errn = 0;
+	for (ai = res; ai != NULL; ai = ai->ai_next) {
+		sock = socket (ai->ai_family, ai->ai_socktype, ai->ai_protocol);
+		if (sock >= 0) {
+			if (connect (sock, ai->ai_addr, ai->ai_addrlen) != -1)
+				break;
+		}
+
+		errn = errno;
+		close (sock);
+		sock = -1;
+	}
+
+	freeaddrinfo (ai);
+
+	/* If we didn't connect */
+	if (sock == -1) {
+		p11_message_err (errn, "couldn't connect to %s at port %s",
+		                 node, port);
+		return CKR_DEVICE_ERROR;
+	}
+
+	rin->base.socket = rpc_socket_new (sock);
+	return_val_if_fail (rin->base.socket != NULL, CKR_GENERAL_ERROR);
+
+	return CKR_OK;
+}
+
+static void
+rpc_inet_free (void *data)
+{
+	rpc_inet *rin = data;
+	rpc_transport_disconnect (data, NULL);
+	rpc_transport_uninit (&rin->base);
+	free (rin->remote);
+	free (rin);
+}
+
+static p11_rpc_transport *
+rpc_inet_init (const char *remote,
+               const char *name)
+{
+	rpc_inet *rin;
+
+	rin = calloc (1, sizeof (rpc_inet));
+	return_val_if_fail (rin != NULL, NULL);
+
+	rin->remote = strdup (remote);
+	return_val_if_fail (rin->remote != NULL, NULL);
+
+	rin->hints.ai_family = AF_UNSPEC;
+	rin->hints.ai_socktype = SOCK_STREAM;
+	rin->hints.ai_protocol = IPPROTO_TCP;
+	rin->hints.ai_flags = AI_NUMERICSERV;
+
+	rin->base.vtable.connect = rpc_inet_connect;
+	rin->base.vtable.disconnect = rpc_transport_disconnect;
+	rin->base.vtable.transport = rpc_transport_buffer;
+	rpc_transport_init (&rin->base, name, rpc_inet_free);
+
+	p11_debug ("initialized rpc tcp: %s", remote);
+	return &rin->base;
+}
+
+typedef struct {
+	p11_rpc_transport base;
+	char *remote;
+} rpc_unix;
+
+static CK_RV
+rpc_unix_connect (p11_rpc_client_vtable *vtable,
+                  void *init_reserved)
+{
+	rpc_unix *rux = (rpc_unix *)vtable;
+	struct sockaddr_un addr;
+	int sock;
+
+	if (strlen (rux->remote) > sizeof (addr.sun_path) - 1) {
+		p11_message ("unix socket path is too long: %s", rux->remote);
+		return CKR_DEVICE_ERROR;
+	}
+
+	memset (&addr, 0, sizeof (addr));
+	addr.sun_family = AF_UNIX;
+	strncpy (addr.sun_path, rux->remote, sizeof (addr.sun_path) - 1);
+
+	sock = socket (AF_UNIX, SOCK_STREAM, 0);
+	if (sock < 0 || connect (sock, (struct sockaddr *)&addr, sizeof (addr)) != -1) {
+		p11_message_err (errno, "couldn't connect to %s", rux->remote);
+		if (sock >= 0)
+			close (sock);
+		return CKR_DEVICE_ERROR;
+	}
+
+	rux->base.socket = rpc_socket_new (sock);
+	return_val_if_fail (rux->base.socket != NULL, CKR_GENERAL_ERROR);
+
+	return CKR_OK;
+}
+
+static void
+rpc_unix_free (void *data)
+{
+	rpc_unix *rux = data;
+	rpc_transport_disconnect (data, NULL);
+	rpc_transport_uninit (&rux->base);
+	free (rux->remote);
+	free (rux);
+}
+
+static p11_rpc_transport *
+rpc_unix_init (const char *remote,
+               const char *name)
+{
+	rpc_unix *rux;
+
+	rux = calloc (1, sizeof (rpc_unix));
+	return_val_if_fail (rux != NULL, NULL);
+
+	rux->remote = strdup (remote);
+	return_val_if_fail (rux->remote != NULL, NULL);
+
+	rux->base.vtable.connect = rpc_unix_connect;
+	rux->base.vtable.disconnect = rpc_transport_disconnect;
+	rux->base.vtable.transport = rpc_transport_buffer;
+	rpc_transport_init (&rux->base, name, rpc_unix_free);
+
+	p11_debug ("initialized rpc unix: %s", remote);
+	return &rux->base;
 }
 
 #endif /* OS_UNIX */
@@ -821,15 +1013,17 @@ p11_rpc_transport_new (p11_virtual *virt,
 	return_val_if_fail (remote != NULL, NULL);
 	return_val_if_fail (name != NULL, NULL);
 
-#ifdef OS_UNIX
-	/* For now we assume it's all a command line */
-	rpc = rpc_exec_init (remote, name);
+	/* This is a command we can execute */
+	if (remote[0] == '|')
+		rpc = rpc_exec_init (remote + 1, name);
 
-#else /* !OS_WIN32 */
-	rpc = NULL;
-	p11_message ("Windows not yet supported for remote");
+	/* This is a UNIX socket */
+	else if (remote[0] == '/')
+		rpc = rpc_unix_init (remote, name);
 
-#endif /* OS_WIN32 */
+	/* This is an address or host name */
+	else
+		rpc = rpc_inet_init (remote, name);
 
 	if (!rpc)
 		return NULL;
