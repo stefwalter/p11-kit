@@ -173,16 +173,11 @@ p11_kit_remote (int argc,
 		return 2;
 	}
 
-	if (isatty (0)) {
-		p11_message ("the 'remote' tool is not meant to be run from a terminal");
-		return 2;
-	}
-
 	module = p11_kit_module_load (argv[0], 0);
 	if (module == NULL)
 		return 1;
 
-	ret = p11_kit_remote_serve_module (module, 0, 1);
+	ret = p11_kit_remote_serve_module (module, getenv("P11_KIT_SOCKET"));
 	p11_kit_module_release (module);
 
 	return ret;

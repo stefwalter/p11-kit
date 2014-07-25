@@ -47,34 +47,61 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <signal.h>
 #include <unistd.h>
 
-int
-p11_kit_remote_serve_module (CK_FUNCTION_LIST *module,
-                             int in_fd,
-                             int out_fd)
+#include <sys/types.h>
+#include <sys/socket.h>
+#include <sys/wait.h>
+#include <sys/un.h>
+
+#ifdef HAVE_SIGHANDLER_T
+# define SIGHANDLER_T sighandler_t
+#elif HAVE_SIG_T
+# define SIGHANDLER_T sig_t
+#elif HAVE___SIGHANDLER_T
+# define SIGHANDLER_T __sighandler_t
+#else
+typedef void (*sighandler_t)(int);
+# define SIGHANDLER_T sighandler_t
+#endif
+
+static unsigned need_children_cleanup = 0;
+static unsigned children_avail = 0;
+
+static
+SIGHANDLER_T ocsignal(int signum, SIGHANDLER_T handler)
+{
+	struct sigaction new_action, old_action;
+
+	new_action.sa_handler = handler;
+	sigemptyset (&new_action.sa_mask);
+	new_action.sa_flags = 0;
+
+	sigaction (signum, &new_action, &old_action);
+	return old_action.sa_handler;
+}
+
+static int
+serve_module (CK_FUNCTION_LIST *module,
+              p11_buffer *options, p11_buffer *buffer,
+              p11_virtual *virt,
+              int fd)
 {
 	p11_rpc_status status;
 	unsigned char version;
-	p11_virtual virt;
-	p11_buffer options;
-	p11_buffer buffer;
+	uint32_t pid;
 	size_t state;
 	int ret = 1;
 	int code;
+	struct iovec iov[2];
 
-	return_val_if_fail (module != NULL, 1);
-
-	p11_buffer_init (&options, 0);
-	p11_buffer_init (&buffer, 0);
-
-	p11_virtual_init (&virt, &p11_virtual_base, module, NULL);
-
-	switch (read (in_fd, &version, 1)) {
+	switch (read (fd, &version, 1)) {
 	case 0:
+		status = P11_RPC_EOF;
 		goto out;
 	case 1:
-		if (version != 0) {
+		if (version != 1) {
 			p11_message ("unspported version received: %d", (int)version);
 			goto out;
 		}
@@ -85,11 +112,19 @@ p11_kit_remote_serve_module (CK_FUNCTION_LIST *module,
 	}
 
 	version = 0;
-	switch (write (out_fd, &version, out_fd)) {
-	case 1:
+	pid = getpid();
+
+	iov[0].iov_base = &version;
+	iov[0].iov_len = 1;
+
+	iov[1].iov_base = &pid;
+	iov[1].iov_len = 4;
+
+	switch (writev (fd, iov, 2)) {
+	case 5:
 		break;
 	default:
-		p11_message_err (errno, "couldn't write credential byte");
+		p11_message_err (errno, "couldn't write credential bytes");
 		goto out;
 	}
 
@@ -99,8 +134,8 @@ p11_kit_remote_serve_module (CK_FUNCTION_LIST *module,
 		code = 0;
 
 		do {
-			status = p11_rpc_transport_read (in_fd, &state, &code,
-			                                 &options, &buffer);
+			status = p11_rpc_transport_read (fd, &state, &code,
+			                                 options, buffer);
 		} while (status == P11_RPC_AGAIN);
 
 		switch (status) {
@@ -116,16 +151,16 @@ p11_kit_remote_serve_module (CK_FUNCTION_LIST *module,
 			goto out;
 		}
 
-		if (!p11_rpc_server_handle (&virt.funcs, &buffer, &buffer)) {
+		if (!p11_rpc_server_handle (&virt->funcs, buffer, buffer)) {
 			p11_message ("unexpected error handling rpc message");
 			goto out;
 		}
 
 		state = 0;
-		options.len = 0;
+		options->len = 0;
 		do {
-			status = p11_rpc_transport_write (out_fd, &state, code,
-			                                  &options, &buffer);
+			status = p11_rpc_transport_write (fd, &state, code,
+			                                  options, buffer);
 		} while (status == P11_RPC_AGAIN);
 
 		switch (status) {
@@ -138,6 +173,145 @@ p11_kit_remote_serve_module (CK_FUNCTION_LIST *module,
 			p11_message_err (errno, "failed to write rpc message");
 			goto out;
 		}
+	}
+
+out:
+	return ret;
+}
+
+static void cleanup_children(void)
+{
+int status;
+pid_t pid;
+
+	while ((pid = waitpid(-1, &status, WNOHANG)) > 0) {
+		if (children_avail > 0)
+			children_avail--;
+		if (WIFSIGNALED(status)) {
+			if (WTERMSIG(status) == SIGSEGV)
+				p11_message("child %u died with sigsegv\n", (unsigned)pid);
+			else
+				p11_message("child %u died with signal %d\n", (unsigned)pid, (int)WTERMSIG(status));
+		}
+	}
+	need_children_cleanup = 0;
+}
+
+static void handle_children(int signo)
+{
+	need_children_cleanup = 1;
+}
+
+int
+p11_kit_remote_serve_module (CK_FUNCTION_LIST *module,
+                             const char *socket_file)
+{
+	p11_virtual virt;
+	p11_buffer options;
+	p11_buffer buffer;
+	int ret = 1, rc, sd;
+	int e, cfd;
+	pid_t pid;
+	socklen_t sa_len;
+	struct sockaddr_un sa;
+	fd_set rd_set;
+	struct timespec ts;
+	sigset_t emptyset, blockset;
+
+	sigemptyset(&blockset);
+	sigemptyset(&emptyset);
+	sigaddset(&blockset, SIGCHLD);
+	ocsignal(SIGCHLD, handle_children);
+
+	return_val_if_fail (module != NULL, 1);
+
+	/* listen to unix socket */
+	memset(&sa, 0, sizeof(sa));
+	sa.sun_family = AF_UNIX;
+	snprintf(sa.sun_path, sizeof(sa.sun_path), "%s", socket_file);
+
+	sd = socket(AF_UNIX, SOCK_STREAM, 0);
+	if (sd == -1) {
+		e = errno;
+		p11_message ("could not create socket %s: %s", socket_file, strerror(e));
+		goto out;
+	}
+
+	umask(066);
+	rc = bind(sd, (struct sockaddr *)&sa, SUN_LEN(&sa));
+	if (rc == -1) {
+		e = errno;
+		p11_message ("could not create socket %s: %s", socket_file, strerror(e));
+		goto out;
+	}
+
+#if 0
+	rc = chown(SOCKET_FILE, config->uid, config->gid);
+	if (rc == -1) {
+		e = errno;
+		p11_message ("could not chown socket %s: %s", socket_file, strerror(e));
+	}
+#endif
+
+	rc = listen(sd, 1024);
+	if (rc == -1) {
+		e = errno;
+		p11_message ("could not listen to socket %s: %s", socket_file, strerror(e));
+		goto out;
+	}
+
+	p11_buffer_init (&options, 0);
+	p11_buffer_init (&buffer, 0);
+
+	p11_virtual_init (&virt, &p11_virtual_base, module, NULL);
+
+	sigprocmask(SIG_BLOCK, &blockset, NULL);
+	/* accept connections */
+	for (;;) {
+		if (need_children_cleanup)
+			cleanup_children();
+
+		FD_ZERO(&rd_set);
+		FD_SET(sd, &rd_set);
+		ts.tv_nsec = 0;
+		ts.tv_sec = 30;
+
+		ret = pselect(sd + 1, &rd_set, NULL, NULL, &ts, &emptyset);
+		if (ret == -1 && errno == EINTR)
+			continue;
+
+		if (ret == 0 && children_avail == 0) { /* timeout */
+			p11_message ("no connections for 30 secs, exiting");
+			exit(0);
+		}
+
+		sa_len = sizeof(sa);
+		cfd = accept(sd, (struct sockaddr *)&sa, &sa_len);
+		if (cfd == -1) {
+			e = errno;
+			if (e != EINTR) {
+				p11_message ("could not accept from socket %s: %s", socket_file, strerror(e));
+			}
+			continue;
+		}
+
+		/* XXX: check the uid of the peer */
+
+		pid = fork();
+		switch(pid) {
+			case -1:
+				 p11_message_err (errno, "failed to fork for accept");
+				 continue;
+			case 0:
+				/* child */
+				sigprocmask(SIG_UNBLOCK, &blockset, NULL);
+				serve_module (module, &options, &buffer, &virt, cfd);
+				_exit(0);
+			default:
+				children_avail++;
+				break;
+		}
+		close(cfd);
 	}
 
 out:

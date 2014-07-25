@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2014 Red Hat Inc.
+ * Copyright (c) 2014, Red Hat
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -29,27 +29,44 @@
  * THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH
  * DAMAGE.
  *
- * Author: Stef Walter <stefw@redhat.com>
+ * Author: Nikos Mavrogiannopoulos
  */
 
-#ifndef __P11_KIT_REMOTE_H__
-#define __P11_KIT_REMOTE_H__
+#include "config.h"
+#include <sys/types.h>
+#include <sys/stat.h>
+#include <fcntl.h>
+#include <unistd.h>
+#include <stdint.h>
+#include <errno.h>
+#include "rnd.h"
 
-#include "p11-kit/p11-kit.h"
+int p11_rnd(void *_data, unsigned size)
+{
+	int fd;
+	uint8_t *data = _data;
+	ssize_t res, done = 0;
 
-#ifdef __cplusplus
-extern "C" {
-#endif
+	fd = open("/dev/urandom", O_RDONLY);
+	if (fd < 0) {
+		return -1;
+	}
 
-#ifdef P11_KIT_FUTURE_UNSTABLE_API
+	for (done = 0; done < size;) {
+		do {
+			res = read(fd, data + done, size - done);
+		} while (res < 0 && errno == EINTR);
 
-int                    p11_kit_remote_serve_module          (CK_FUNCTION_LIST *module,
-							     const char *socket);
+		if (res <= 0) {
+			res = -1;
+			goto cleanup;
+		}
+		done += res;
+	}
 
-#endif
+	res = 0;
 
-#ifdef __cplusplus
-} /* extern "C" */
-#endif
-
-#endif /* __P11_KIT_REMOTE_H__ */
+ cleanup:
+	close(fd);
+	return res;
+}

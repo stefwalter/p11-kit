@@ -68,9 +68,14 @@ AC_C_BIGENDIAN
 AC_HEADER_STDBOOL
 
 if test "$os_unix" = "yes"; then
-	AC_CHECK_FUNC([pthread_create], , [
-		AC_CHECK_LIB(pthread, pthread_create, , [
-			AC_MSG_ERROR([could not find pthread_create])
+	AC_CHECK_TYPES([sighandler_t, sig_t, __sighandler_t],,,
+		[#include <sys/types.h>
+		 #include <signal.h>
+	])
+
+	AC_CHECK_FUNC([pthread_mutexattr_init], , [
+		AC_CHECK_LIB(pthread, pthread_mutexattr_init, , [
+			AC_MSG_ERROR([could not find pthread_mutexattr_init])
 		])
 	])
 
