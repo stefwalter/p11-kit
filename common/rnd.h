@@ -29,27 +29,14 @@
  * THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH
  * DAMAGE.
  *
- * Author: Stef Walter <stefw@redhat.com>
+ * Author: Nikos Mavrogiannopoulos
  */
 
-#ifndef __P11_KIT_REMOTE_H__
-#define __P11_KIT_REMOTE_H__
+#ifndef P11_RND_H_
+#define P11_RND_H_
 
-#include "p11-kit/p11-kit.h"
+#include <getopt.h>
 
-#ifdef __cplusplus
-extern "C" {
-#endif
+int        p11_rnd              (void *data, unsigned size);
 
-#ifdef P11_KIT_FUTURE_UNSTABLE_API
-
-int                    p11_kit_remote_serve_module          (CK_FUNCTION_LIST *module,
-							     const char *socket);
-
-#endif
-
-#ifdef __cplusplus
-} /* extern "C" */
-#endif
-
-#endif /* __P11_KIT_REMOTE_H__ */
+#endif /* P11_RND_H_ */

@@ -24,8 +24,10 @@ libp11_common_la_SOURCES = \
 	common/lexer.c common/lexer.h \
 	common/message.c common/message.h \
 	common/path.c common/path.h \
-	common/pkcs11.h common/pkcs11x.h common/pkcs11i.h \
+	common/pkcs11.h common/pkcs11x.h \
 	common/url.c common/url.h \
+	common/rnd.c common/rnd.h \
+	common/unix-peer.c common/unix-peer.h \
 	$(NULL)
 
 libp11_library_la_SOURCES = \

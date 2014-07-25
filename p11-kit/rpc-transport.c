@@ -42,6 +42,8 @@
 #include "message.h"
 #include "pkcs11.h"
 #include "private.h"
+#include "rnd.h"
+#include "unix-peer.h"
 #include "rpc.h"
 #include "rpc-message.h"
 
@@ -50,11 +52,16 @@
 #include <assert.h>
 #include <errno.h>
 #include <fcntl.h>
+#include <limits.h>
 #include <stdint.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
 #ifdef OS_UNIX
+#ifdef __linux__
+# include <sys/prctl.h>
+#endif
 #include <sys/socket.h>
 #include <sys/wait.h>
 #include <sys/un.h>
@@ -73,6 +80,7 @@
 typedef struct {
 	/* Never changes */
 	int fd;
+	pid_t pid;
 
 	/* Protected by the lock */
 	p11_mutex_t write_lock;
@@ -89,14 +97,49 @@ typedef struct {
 } rpc_socket;
 
 static rpc_socket *
-rpc_socket_new (int fd)
+rpc_socket_new (const char *file, unsigned nowait)
 {
 	rpc_socket *sock;
+	struct sockaddr_un sa;
+	int ret;
+	unsigned i;
+
+	memset(&sa, 0, sizeof(sa));
+	sa.sun_family = AF_UNIX;
+	snprintf(sa.sun_path, sizeof(sa.sun_path), "%s", file);
 
 	sock = calloc (1, sizeof (rpc_socket));
 	return_val_if_fail (sock != NULL, NULL);
 
-	sock->fd = fd;
+	sock->fd = socket(AF_UNIX, SOCK_STREAM, 0);
+	if (sock->fd == -1) {
+		free(sock);
+		p11_message ("could not open socket");
+		return_val_if_reached (NULL);
+	}
+
+	p11_debug ("connecting to: %s", file);
+
+	/* try to connect to child */
+	for (i=0;i<5;i++) {
+		ret = connect(sock->fd, (struct sockaddr *)&sa, sizeof(sa));
+		if (ret == 0 || nowait != 0)
+			break;
+		p11_sleep_ms(1000);
+	}
+	if (ret == -1) {
+		close(sock->fd);
+		free(sock);
+		if (nowait == 0) {
+			p11_message ("could not connect to socket: %s", file);
+			return_val_if_reached (NULL);
+		} else {
+			return NULL;
+		}
+	}
+
+	p11_debug ("connected to: %s", file);
+
 	sock->last_code = 0x10;
 	sock->read_creds = false;
 	sock->sent_creds = false;
@@ -133,8 +176,11 @@ static void
 rpc_socket_close (rpc_socket *sock)
 {
 	assert (sock != NULL);
-	if (sock->fd != -1)
+
+	if (sock->fd != -1) {
+		/* kill our peer */
 		close (sock->fd);
+	}
 	sock->fd = -1;
 }
 
@@ -222,19 +268,9 @@ rpc_socket_write_inlock (rpc_socket *sock,
                          p11_buffer *buffer)
 {
 	unsigned char header[12];
-	unsigned char dummy = '\0';
 
 	/* The socket is locked and referenced at this point */
 	assert (buffer != NULL);
-
-	/* Place holder byte, will later carry unix credentials (on some systems) */
-	if (!sock->sent_creds) {
-		if (write_all (sock->fd, &dummy, 1) != 1) {
-			p11_message_err (errno, "couldn't send socket credentials");
-			return CKR_DEVICE_ERROR;
-		}
-		sock->sent_creds = true;
-	}
 
 	p11_rpc_buffer_encode_uint32 (header, code);
 	p11_rpc_buffer_encode_uint32 (header + 4, options->len);
@@ -346,7 +382,6 @@ rpc_socket_read (rpc_socket *sock,
 {
 	CK_RV ret = CKR_DEVICE_ERROR;
 	unsigned char header[12];
-	unsigned char dummy;
 	fd_set rfds;
 
 	assert (code != NULL);
@@ -358,12 +393,6 @@ rpc_socket_read (rpc_socket *sock,
 	 */
 
 	p11_mutex_lock (&sock->read_lock);
-
-	if (!sock->read_creds) {
-		if (read_all (sock->fd, &dummy, 1) != 1)
-			return CKR_DEVICE_ERROR;
-		sock->read_creds = true;
-	}
 
 	for (;;) {
 		/* No message header has been read yet? ... read one in */
@@ -635,48 +664,8 @@ rpc_transport_buffer (p11_rpc_client_vtable *vtable,
 typedef struct {
 	p11_rpc_transport base;
 	p11_array *argv;
-	pid_t pid;
+	char sfile[_POSIX_PATH_MAX];
 } rpc_exec;
-
-static void
-rpc_exec_wait_or_terminate (pid_t pid)
-{
-	bool terminated = false;
-	int status;
-	int sig;
-	int ret;
-	int i;
-
-
-	for (i = 0; i < 3 * 1000; i += 100) {
-		ret = waitpid (pid, &status, WNOHANG);
-		if (ret != 0)
-			break;
-		p11_sleep_ms (100);
-	}
-
-	if (ret == 0) {
-		p11_message ("process %d did not exit, terminating", (int)pid);
-		kill (pid, SIGTERM);
-		terminated = true;
-		ret = waitpid (pid, &status, 0);
-	}
-
-	if (ret < 0) {
-		p11_message_err (errno, "failed to wait for executed child: %d", (int)pid);
-		status = 0;
-	} else if (WIFEXITED (status)) {
-		status = WEXITSTATUS (status);
-		if (status == 0)
-			p11_debug ("process %d exited with status 0", (int)pid);
-		else
-			p11_message ("process %d exited with status %d", (int)pid, status);
-	} else if (WIFSIGNALED (status)) {
-		sig = WTERMSIG (status);
-		if (!terminated || sig != SIGTERM)
-			p11_message ("process %d was terminated with signal %d", (int)pid, sig);
-	}
-}
 
 static void
 rpc_exec_disconnect (p11_rpc_client_vtable *vtable,
@@ -686,10 +675,6 @@ rpc_exec_disconnect (p11_rpc_client_vtable *vtable,
 
 	if (rex->base.socket)
 		rpc_socket_close (rex->base.socket);
-
-	if (rex->pid)
-		rpc_exec_wait_or_terminate (rex->pid);
-	rex->pid = 0;
 
 	/* Do the common disconnect stuff */
 	rpc_transport_disconnect (vtable, fini_reserved);
@@ -712,14 +697,17 @@ rpc_exec_connect (p11_rpc_client_vtable *vtable,
 	rpc_exec *rex = (rpc_exec *)vtable;
 	pid_t pid;
 	int max_fd;
-	int fds[2];
+	uint32_t upid;
 	int errn;
+	unsigned char dummy = 1;
+	struct iovec iov[2];
 
 	p11_debug ("executing rpc transport: %s", (char *)rex->argv->elem[0]);
 
-	if (socketpair (AF_UNIX, SOCK_STREAM, 0, fds) < 0) {
-		p11_message_err (errno, "failed to create pipe for remote");
-		return CKR_DEVICE_ERROR;
+	/* check whether a server is already there and we can connect to it */
+	rex->base.socket = rpc_socket_new (rex->sfile, 1);
+	if (rex->base.socket != NULL) {
+		goto success;
 	}
 
 	pid = fork ();
@@ -727,19 +715,17 @@ rpc_exec_connect (p11_rpc_client_vtable *vtable,
 
 	/* Failure */
 	case -1:
-		close (fds[0]);
-		close (fds[1]);
 		p11_message_err (errno, "failed to fork for remote");
 		return CKR_DEVICE_ERROR;
 
 	/* Child */
 	case 0:
-		if (dup2 (fds[1], STDIN_FILENO) < 0 ||
-		    dup2 (fds[1], STDOUT_FILENO) < 0) {
-			errn = errno;
-			p11_message_err (errn, "couldn't dup file descriptors in remote child");
-			_exit (errn);
-		}
+#ifdef __linux__
+		prctl(PR_SET_PDEATHSIG, SIGTERM);
+#endif
+		p11_debug ("forked sec-mod server");
+		/* save the socket file */
+		setenv("P11_KIT_SOCKET", rex->sfile, 1);
 
 		/* Close file descriptors, except for above on exec */
 		max_fd = STDERR_FILENO + 1;
@@ -756,10 +742,29 @@ rpc_exec_connect (p11_rpc_client_vtable *vtable,
 		break;
 	}
 
-	close (fds[1]);
-	rex->pid = pid;
-	rex->base.socket = rpc_socket_new (fds[0]);
+	rex->base.socket = rpc_socket_new (rex->sfile, 0);
 	return_val_if_fail (rex->base.socket != NULL, CKR_GENERAL_ERROR);
+
+ success:
+	/* this is read as version from the peer --nmav */
+	if (write_all (rex->base.socket->fd, &dummy, 1) != 1) {
+		p11_message_err (errno, "couldn't send version");
+		return CKR_DEVICE_ERROR;
+	}
+	rex->base.socket->sent_creds = true;
+
+	iov[0].iov_base = &dummy;
+	iov[0].iov_len = 1;
+	iov[1].iov_base = &upid;
+	iov[1].iov_len = 4;
+
+	errn = readv(rex->base.socket->fd, iov, 2);
+	if (errn != 5) {
+		p11_message_err (errno, "couldn't read version: %d", errn);
+		return CKR_DEVICE_ERROR;
+	}
+	rex->base.socket->read_creds = true;
+	rex->base.socket->pid = upid;
 
 	return CKR_OK;
 }
@@ -771,6 +776,7 @@ rpc_exec_free (void *data)
 	rpc_exec_disconnect (data, NULL);
 	rpc_transport_uninit (&rex->base);
 	p11_array_free (rex->argv);
+	remove(rex->sfile);
 	free (rex);
 }
 
@@ -790,6 +796,7 @@ rpc_exec_init (const char *remote,
 {
 	p11_array *argv;
 	rpc_exec *rex;
+	unsigned t;
 
 	argv = p11_array_new (free);
 	if (!p11_argv_parse (remote, on_argv_parsed, argv) || argv->num < 1) {
@@ -803,6 +810,9 @@ rpc_exec_init (const char *remote,
 
 	p11_array_push (argv, NULL);
 	rex->argv = argv;
+
+	p11_rnd(&t, sizeof(t));
+	snprintf(rex->sfile, sizeof(rex->sfile), "/tmp/p11-kit-rpc.%u", t);
 
 	rex->base.vtable.connect = rpc_exec_connect;
 	rex->base.vtable.disconnect = rpc_exec_disconnect;
