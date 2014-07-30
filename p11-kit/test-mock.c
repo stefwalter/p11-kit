@@ -57,7 +57,8 @@ test_get_info (void)
 	assert_num_eq (rv, CKR_OK);
 	assert_num_eq (MOCK_INFO.cryptokiVersion.major, info.cryptokiVersion.major);
 	assert_num_eq (MOCK_INFO.cryptokiVersion.minor, info.cryptokiVersion.minor);
-	assert (memcmp (MOCK_INFO.manufacturerID, info.manufacturerID, sizeof (info.manufacturerID)) == 0);
+	/* in virtual modules we replace the manID */
+	/*assert (memcmp (MOCK_INFO.manufacturerID, info.manufacturerID, sizeof (info.manufacturerID)) == 0);*/
 	assert_num_eq (MOCK_INFO.flags, info.flags);
 	assert (memcmp (MOCK_INFO.libraryDescription, info.libraryDescription, sizeof (info.libraryDescription)) == 0);
 	assert_num_eq (MOCK_INFO.libraryVersion.major, info.libraryVersion.major);

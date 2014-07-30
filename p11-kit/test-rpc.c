@@ -908,8 +908,8 @@ invoke_in_thread (void *arg)
 	rv = (rpc_module->C_GetInfo) (&info);
 	assert_num_eq (rv, CKR_OK);
 
-	assert (memcmp (info.manufacturerID, MOCK_INFO.manufacturerID,
-	                sizeof (info.manufacturerID)) == 0);
+	assert (memcmp (info.libraryDescription, MOCK_INFO.libraryDescription,
+	                sizeof (info.libraryDescription)) == 0);
 
 	return NULL;
 }

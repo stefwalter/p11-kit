@@ -49,18 +49,26 @@
 #endif
 #include <stdlib.h>
 #include <stdio.h>
+#include <sys/time.h>
 
 struct {
 	char *directory;
 	char *user_config;
 	char *user_modules;
+	pid_t pid; /*remote's pid */
 } test;
+
+static int initialized = 0;
 
 static void
 setup_remote (void *unused)
 {
-	const char *data;
+	char *data;
+	char name[64+sizeof(BUILDDIR)];
+	pid_t pid;
+	struct timeval tv;
 
+	test.pid = -1;
 	test.directory = p11_test_directory ("p11-test-config");
 	test.user_modules = p11_path_build (test.directory, "modules", NULL);
 #ifdef OS_UNIX
@@ -74,8 +82,31 @@ setup_remote (void *unused)
 	test.user_config = p11_path_build (test.directory, "pkcs11.conf", NULL);
 	p11_test_file_write (NULL, test.user_config, data, strlen (data));
 
-	data = "remote: |" BUILDDIR "/p11-kit/p11-kit remote " BUILDDIR "/.libs/mock-two.so\n";
-	p11_test_file_write (test.user_modules, "remote.module", data, strlen (data));
+	if (initialized == 0) {
+		gettimeofday(&tv, NULL);
+		snprintf(name, sizeof(name), BUILDDIR"/sock.%u.%u",
+				(unsigned)tv.tv_sec, (unsigned)tv.tv_usec);
+
+		pid = fork();
+		switch(pid) {
+			case -1:
+				assert_not_reached ();
+			case 0:
+				if (execl(BUILDDIR"/../p11-kit", BUILDDIR"/../p11-kit", "remote", "-f",
+					BUILDDIR"/.libs/mock-two.so", "-s", name, "-t", "30", NULL) == -1)
+					assert_not_reached ();
+				exit(0);
+			default:
+				break;
+		}
+
+		test.pid = pid;
+		if (asprintf(&data, "remote: %s", name) == -1)
+			assert_not_reached();
+		p11_test_file_write (test.user_modules, "remote.module", data, strlen (data));
+		free(data);
+		initialized = 1;
+	}
 
 	p11_config_user_modules = test.user_modules;
 	p11_config_user_file = test.user_config;
@@ -152,6 +183,7 @@ test_basic_exec (void)
 	assert_num_eq (rv, CKR_OK);
 
 	p11_kit_modules_release (modules);
+	initialized = 0;
 }
 
 static void *
@@ -164,8 +196,8 @@ invoke_in_thread (void *arg)
 	rv = (rpc_module->C_GetInfo) (&info);
 	assert_num_eq (rv, CKR_OK);
 
-	assert (memcmp (info.manufacturerID, MOCK_INFO.manufacturerID,
-	                sizeof (info.manufacturerID)) == 0);
+	assert (memcmp (info.libraryDescription, MOCK_INFO.libraryDescription,
+	                sizeof (info.libraryDescription)) == 0);
 
 	return NULL;
 }
@@ -200,6 +232,7 @@ test_simultaneous_functions (void)
 	assert_num_eq (rv, CKR_OK);
 
 	p11_kit_modules_release (modules);
+	initialized = 0;
 }
 
 #ifdef OS_UNIX
@@ -254,6 +287,7 @@ test_fork_and_reinitialize (void)
 	assert_num_eq (rv, CKR_OK);
 
 	p11_kit_modules_release (modules);
+	initialized = 0;
 }
 
 #endif /* OS_UNIX */
