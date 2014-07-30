@@ -333,22 +333,25 @@ main (int argc,
       char *argv[])
 {
 	CK_FUNCTION_LIST *module;
+	char *socket_file = NULL;
 	int opt;
 	int ret;
 
 	enum {
 		opt_verbose = 'v',
 		opt_help = 'h',
+		opt_socket = 's',
 	};
 
 	struct option options[] = {
 		{ "verbose", no_argument, NULL, opt_verbose },
 		{ "help", no_argument, NULL, opt_help },
+		{ "socket", required_argument, NULL, opt_socket },
 		{ 0 },
 	};
 
 	p11_tool_desc usages[] = {
-		{ 0, "usage: p11-kit remote <module>" },
+		{ 0, "usage: p11-kit remote <module> -s <socket-file>" },
 		{ 0 },
 	};
 
@@ -356,6 +359,9 @@ main (int argc,
 		switch (opt) {
 		case opt_verbose:
 			p11_kit_be_loud ();
+			break;
+		case opt_socket:
+			socket_file = strdup(optarg);
 			break;
 		case opt_help:
 		case '?':
@@ -372,6 +378,11 @@ main (int argc,
 
 	if (argc != 1) {
 		p11_message ("specify the module to remote");
+		return 2;
+	}
+
+	if (socket_file == NULL) {
+		p11_tool_usage (usages, options);
 		return 2;
 	}
 
