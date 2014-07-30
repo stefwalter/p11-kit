@@ -44,7 +44,8 @@ extern "C" {
 #ifdef P11_KIT_FUTURE_UNSTABLE_API
 
 int                    p11_kit_remote_serve_module          (CK_FUNCTION_LIST *module,
-							     const char *socket);
+							     const char *socket,
+							     uid_t, gid_t);
 
 #endif
 

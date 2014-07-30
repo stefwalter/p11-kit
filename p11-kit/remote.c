@@ -57,6 +57,8 @@
 #include <sys/wait.h>
 #include <sys/un.h>
 
+#include "unix-peer.h"
+
 #ifdef HAVE_SIGHANDLER_T
 # define SIGHANDLER_T sighandler_t
 #elif HAVE_SIG_T
@@ -210,7 +212,9 @@ handle_children (int signo)
 
 int
 p11_kit_remote_serve_module (CK_FUNCTION_LIST *module,
-                             const char *socket_file)
+                             const char *socket_file,
+                             uid_t uid,
+                             gid_t gid)
 {
 	p11_virtual virt;
 	p11_buffer options;
@@ -222,6 +226,8 @@ p11_kit_remote_serve_module (CK_FUNCTION_LIST *module,
 	struct sockaddr_un sa;
 	fd_set rd_set;
 	sigset_t emptyset, blockset;
+	uid_t tuid;
+	gid_t tgid;
 
 	sigemptyset(&blockset);
 	sigemptyset(&emptyset);
@@ -252,13 +258,14 @@ p11_kit_remote_serve_module (CK_FUNCTION_LIST *module,
 		return 1;
 	}
 
-#if 0
-	rc = chown(SOCKET_FILE, config->uid, config->gid);
-	if (rc == -1) {
-		e = errno;
-		p11_message ("could not chown socket %s: %s", socket_file, strerror(e));
+	if (uid != -1 && gid != -1) {
+		rc = chown(socket_file, uid, gid);
+		if (rc == -1) {
+			e = errno;
+			p11_message ("could not chown socket %s: %s", socket_file, strerror(e));
+			return 1;
+		}
 	}
-#endif
 
 	/* run as daemon */
 	if (daemon(0,0) == -1) {
@@ -306,7 +313,29 @@ p11_kit_remote_serve_module (CK_FUNCTION_LIST *module,
 			continue;
 		}
 
-		/* XXX: check the uid of the peer */
+		/* check the uid of the peer */
+		rc = p11_get_upeer_id(cfd, &tuid, &tgid, NULL);
+		if (rc == -1) {
+			e = errno;
+			p11_message ("could not check uid from socket %s: %s", socket_file, strerror(e));
+			goto cont;
+		}
+
+		if (uid != -1) {
+			if (uid != tuid) {
+				p11_message ("connecting uid (%u) doesn't match expected (%u)",
+					(unsigned)tuid, (unsigned)uid);
+				goto cont;
+			}
+		}
+
+		if (gid != -1) {
+			if (gid != tgid) {
+				p11_message ("connecting gid (%u) doesn't match expected (%u)",
+					(unsigned)tgid, (unsigned)gid);
+				goto cont;
+			}
+		}
 
 		pid = fork();
 		switch(pid) {
@@ -322,6 +351,7 @@ p11_kit_remote_serve_module (CK_FUNCTION_LIST *module,
 				children_avail++;
 				break;
 		}
+ cont:
 		close(cfd);
 	}
 
@@ -338,6 +368,8 @@ main (int argc,
 {
 	CK_FUNCTION_LIST *module;
 	char *socket_file = NULL;
+	uid_t uid = -1;
+	gid_t gid = -1;
 	int opt;
 	int ret;
 
@@ -345,17 +377,21 @@ main (int argc,
 		opt_verbose = 'v',
 		opt_help = 'h',
 		opt_socket = 's',
+		opt_user = 'u',
+		opt_group = 'g',
 	};
 
 	struct option options[] = {
 		{ "verbose", no_argument, NULL, opt_verbose },
 		{ "help", no_argument, NULL, opt_help },
 		{ "socket", required_argument, NULL, opt_socket },
+		{ "user", required_argument, NULL, opt_user },
+		{ "group", required_argument, NULL, opt_group },
 		{ 0 },
 	};
 
 	p11_tool_desc usages[] = {
-		{ 0, "usage: p11-kit remote <module> -s <socket-file>" },
+		{ 0, "usage: p11-kit remote <module> -s <socket-file> -u <allowed-user> -g <allowed-group>" },
 		{ 0 },
 	};
 
@@ -367,6 +403,24 @@ main (int argc,
 		case opt_socket:
 			socket_file = strdup(optarg);
 			break;
+		case opt_group: {
+			const struct group* grp = getgrnam(optarg);
+			if (grp == NULL) {
+				p11_message ("unknown group: %s", optarg);
+				return 2;
+			}
+			gid = grp->gr_gid;
+			break;
+		}
+		case opt_user: {
+			const struct passwd* pwd = getpwnam(optarg);
+			if (pwd == NULL) {
+				p11_message ("unknown user: %s", optarg);
+				return 2;
+			}
+			uid = pwd->pw_uid;
+			break;
+		}
 		case opt_help:
 		case '?':
 			p11_tool_usage (usages, options);
@@ -394,7 +448,7 @@ main (int argc,
 	if (module == NULL)
 		return 1;
 
-	ret = p11_kit_remote_serve_module (module, getenv ("P11_KIT_SOCKET"));
+	ret = p11_kit_remote_serve_module (module, socket_file, uid, gid);
 	p11_kit_module_release (module);
 
 	return ret;
