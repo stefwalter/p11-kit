@@ -87,7 +87,8 @@ SIGHANDLER_T ocsignal(int signum, SIGHANDLER_T handler)
 }
 
 static int
-serve_module (CK_FUNCTION_LIST *module,
+serve_module (const char *name,
+              CK_FUNCTION_LIST *module,
               p11_buffer *options,
               p11_buffer *buffer,
               p11_virtual *virt,
@@ -156,7 +157,7 @@ serve_module (CK_FUNCTION_LIST *module,
 			goto out;
 		}
 
-		if (!p11_rpc_server_handle (&virt->funcs, buffer, buffer)) {
+		if (!p11_rpc_server_handle (name, &virt->funcs, buffer, buffer)) {
 			p11_message ("unexpected error handling rpc message");
 			goto out;
 		}
@@ -345,7 +346,7 @@ p11_kit_remote_serve_module (CK_FUNCTION_LIST *module,
 			case 0:
 				/* child */
 				sigprocmask(SIG_UNBLOCK, &blockset, NULL);
-				serve_module (module, &options, &buffer, &virt, cfd);
+				serve_module (socket_file, module, &options, &buffer, &virt, cfd);
 				_exit(0);
 			default:
 				children_avail++;

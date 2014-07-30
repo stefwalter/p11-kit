@@ -394,7 +394,7 @@ rpc_transport (p11_rpc_client_vtable *vtable,
 	assert_str_eq (vtable->data, "vtable-data");
 
 	/* Just pass directly to the server code */
-	ret = p11_rpc_server_handle (&base.funcs, request, response);
+	ret = p11_rpc_server_handle ("virtual", &base.funcs, request, response);
 	assert (ret == true);
 
 	return CKR_OK;
