@@ -55,6 +55,8 @@
 #include <sys/wait.h>
 #include <sys/un.h>
 
+#include "unix-peer.h"
+
 #ifdef HAVE_SIGHANDLER_T
 # define SIGHANDLER_T sighandler_t
 #elif HAVE_SIG_T
@@ -204,7 +206,9 @@ static void handle_children(int signo)
 
 int
 p11_kit_remote_serve_module (CK_FUNCTION_LIST *module,
-                             const char *socket_file)
+                             const char *socket_file,
+                             uid_t uid,
+                             gid_t gid)
 {
 	p11_virtual virt;
 	p11_buffer options;
@@ -216,6 +220,8 @@ p11_kit_remote_serve_module (CK_FUNCTION_LIST *module,
 	struct sockaddr_un sa;
 	fd_set rd_set;
 	sigset_t emptyset, blockset;
+	uid_t tuid;
+	gid_t tgid;
 
 	sigemptyset(&blockset);
 	sigemptyset(&emptyset);
@@ -246,13 +252,14 @@ p11_kit_remote_serve_module (CK_FUNCTION_LIST *module,
 		return 1;
 	}
 
-#if 0
-	rc = chown(SOCKET_FILE, config->uid, config->gid);
-	if (rc == -1) {
-		e = errno;
-		p11_message ("could not chown socket %s: %s", socket_file, strerror(e));
+	if (uid != -1 && gid != -1) {
+		rc = chown(socket_file, uid, gid);
+		if (rc == -1) {
+			e = errno;
+			p11_message ("could not chown socket %s: %s", socket_file, strerror(e));
+			return 1;
+		}
 	}
-#endif
 
 	/* run as daemon */
 	if (daemon(0,0) == -1) {
@@ -300,7 +307,29 @@ p11_kit_remote_serve_module (CK_FUNCTION_LIST *module,
 			continue;
 		}
 
-		/* XXX: check the uid of the peer */
+		/* check the uid of the peer */
+		rc = p11_get_upeer_id(cfd, &tuid, &tgid, NULL);
+		if (rc == -1) {
+			e = errno;
+			p11_message ("could not check uid from socket %s: %s", socket_file, strerror(e));
+			goto cont;
+		}
+
+		if (uid != -1) {
+			if (uid != tuid) {
+				p11_message ("connecting uid (%u) doesn't match expected (%u)",
+					(unsigned)tuid, (unsigned)uid);
+				goto cont;
+			}
+		}
+
+		if (gid != -1) {
+			if (gid != tgid) {
+				p11_message ("connecting gid (%u) doesn't match expected (%u)",
+					(unsigned)tgid, (unsigned)gid);
+				goto cont;
+			}
+		}
 
 		pid = fork();
 		switch(pid) {
@@ -316,6 +345,7 @@ p11_kit_remote_serve_module (CK_FUNCTION_LIST *module,
 				children_avail++;
 				break;
 		}
+ cont:
 		close(cfd);
 	}
 
