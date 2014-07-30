@@ -254,6 +254,12 @@ p11_kit_remote_serve_module (CK_FUNCTION_LIST *module,
 	}
 #endif
 
+	/* run as daemon */
+	if (daemon(0,0) == -1) {
+		e = errno;
+		p11_message ("could not daemonize: %s", strerror(e));
+	}
+
 	rc = listen(sd, 1024);
 	if (rc == -1) {
 		e = errno;
