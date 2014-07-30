@@ -45,7 +45,8 @@ extern "C" {
 
 int                    p11_kit_remote_serve_module          (CK_FUNCTION_LIST *module,
 							     const char *socket,
-							     uid_t, gid_t);
+							     uid_t, gid_t,
+							     unsigned foreground);
 
 #endif
 
