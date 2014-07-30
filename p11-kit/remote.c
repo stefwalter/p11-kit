@@ -221,7 +221,6 @@ p11_kit_remote_serve_module (CK_FUNCTION_LIST *module,
 	socklen_t sa_len;
 	struct sockaddr_un sa;
 	fd_set rd_set;
-	struct timespec ts;
 	sigset_t emptyset, blockset;
 
 	sigemptyset(&blockset);
@@ -236,11 +235,13 @@ p11_kit_remote_serve_module (CK_FUNCTION_LIST *module,
 	sa.sun_family = AF_UNIX;
 	snprintf(sa.sun_path, sizeof(sa.sun_path), "%s", socket_file);
 
+	remove(socket_file);
+
 	sd = socket(AF_UNIX, SOCK_STREAM, 0);
 	if (sd == -1) {
 		e = errno;
 		p11_message ("could not create socket %s: %s", socket_file, strerror(e));
-		goto out;
+		return 1;
 	}
 
 	umask(066);
@@ -248,7 +249,7 @@ p11_kit_remote_serve_module (CK_FUNCTION_LIST *module,
 	if (rc == -1) {
 		e = errno;
 		p11_message ("could not create socket %s: %s", socket_file, strerror(e));
-		goto out;
+		return 1;
 	}
 
 #if 0
@@ -263,7 +264,7 @@ p11_kit_remote_serve_module (CK_FUNCTION_LIST *module,
 	if (rc == -1) {
 		e = errno;
 		p11_message ("could not listen to socket %s: %s", socket_file, strerror(e));
-		goto out;
+		return 1;
 	}
 
 	p11_buffer_init (&options, 0);
@@ -279,10 +280,8 @@ p11_kit_remote_serve_module (CK_FUNCTION_LIST *module,
 
 		FD_ZERO(&rd_set);
 		FD_SET(sd, &rd_set);
-		ts.tv_nsec = 0;
-		ts.tv_sec = 30;
 
-		ret = pselect(sd + 1, &rd_set, NULL, NULL, &ts, &emptyset);
+		ret = pselect(sd + 1, &rd_set, NULL, NULL, NULL, &emptyset);
 		if (ret == -1 && errno == EINTR)
 			continue;
 
@@ -320,7 +319,6 @@ p11_kit_remote_serve_module (CK_FUNCTION_LIST *module,
 		close(cfd);
 	}
 
-out:
 	p11_buffer_uninit (&buffer);
 	p11_buffer_uninit (&options);
 	p11_virtual_uninit (&virt);
