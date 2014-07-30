@@ -215,7 +215,8 @@ int
 p11_kit_remote_serve_module (CK_FUNCTION_LIST *module,
                              const char *socket_file,
                              uid_t uid,
-                             gid_t gid)
+                             gid_t gid,
+                             unsigned foreground)
 {
 	p11_virtual virt;
 	p11_buffer options;
@@ -269,9 +270,11 @@ p11_kit_remote_serve_module (CK_FUNCTION_LIST *module,
 	}
 
 	/* run as daemon */
-	if (daemon(0,0) == -1) {
-		e = errno;
-		p11_message ("could not daemonize: %s", strerror(e));
+	if (foreground == 0) {
+		if (daemon(0,0) == -1) {
+			e = errno;
+			p11_message ("could not daemonize: %s", strerror(e));
+		}
 	}
 
 	rc = listen(sd, 1024);
@@ -373,6 +376,9 @@ main (int argc,
 	gid_t gid = -1, run_as_gid = -1;
 	int opt;
 	int ret;
+	const struct passwd* pwd;
+	const struct group* grp;
+	unsigned foreground = 1;
 
 	enum {
 		opt_verbose = 'v',
@@ -382,6 +388,7 @@ main (int argc,
 		opt_group = 'g',
 		opt_run_as_user = 'a',
 		opt_run_as_group = 'z',
+		opt_foreground = 'f',
 	};
 
 	struct option options[] = {
@@ -444,6 +451,9 @@ main (int argc,
 			}
 			run_as_uid = pwd->pw_uid;
 			break;
+		case opt_foreground:
+			foreground = 1;
+			break;
 		case opt_help:
 		case '?':
 			p11_tool_usage (usages, options);
@@ -493,7 +503,7 @@ main (int argc,
 	if (module == NULL)
 		return 1;
 
-	ret = p11_kit_remote_serve_module (module, socket_file, uid, gid);
+	ret = p11_kit_remote_serve_module (module, socket_file, uid, gid, foreground);
 	p11_kit_module_release (module);
 
 	return ret;
