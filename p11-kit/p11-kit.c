@@ -131,22 +131,25 @@ p11_kit_remote (int argc,
                 char *argv[])
 {
 	CK_FUNCTION_LIST *module;
+	char *socket_file = NULL;
 	int opt;
 	int ret;
 
 	enum {
 		opt_verbose = 'v',
 		opt_help = 'h',
+		opt_socket = 's',
 	};
 
 	struct option options[] = {
 		{ "verbose", no_argument, NULL, opt_verbose },
 		{ "help", no_argument, NULL, opt_help },
+		{ "socket", required_argument, NULL, opt_socket },
 		{ 0 },
 	};
 
 	p11_tool_desc usages[] = {
-		{ 0, "usage: p11-kit remote <module>" },
+		{ 0, "usage: p11-kit remote <module> -s <socket-file>" },
 		{ 0 },
 	};
 
@@ -154,6 +157,9 @@ p11_kit_remote (int argc,
 		switch (opt) {
 		case opt_verbose:
 			p11_kit_be_loud ();
+			break;
+		case opt_socket:
+			socket_file = strdup(optarg);
 			break;
 		case opt_help:
 		case '?':
@@ -168,6 +174,11 @@ p11_kit_remote (int argc,
 	argc -= optind;
 	argv += optind;
 
+	if (socket_file == NULL) {
+		p11_tool_usage (usages, options);
+		return 2;
+	}
+
 	if (argc != 1) {
 		p11_message ("specify the module to remote");
 		return 2;
@@ -177,7 +188,7 @@ p11_kit_remote (int argc,
 	if (module == NULL)
 		return 1;
 
-	ret = p11_kit_remote_serve_module (module, getenv("P11_KIT_SOCKET"));
+	ret = p11_kit_remote_serve_module (module, socket_file);
 	p11_kit_module_release (module);
 
 	return ret;
