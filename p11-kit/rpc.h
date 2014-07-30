@@ -59,7 +59,8 @@ struct _p11_rpc_client_vtable {
 bool                   p11_rpc_client_init         (p11_virtual *virt,
                                                     p11_rpc_client_vtable *vtable);
 
-bool                   p11_rpc_server_handle       (CK_X_FUNCTION_LIST *funcs,
+bool                   p11_rpc_server_handle       (const char *name,
+						    CK_X_FUNCTION_LIST *funcs,
                                                     p11_buffer *request,
                                                     p11_buffer *response);
 
