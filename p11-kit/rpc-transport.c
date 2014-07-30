@@ -658,12 +658,11 @@ rpc_transport_buffer (p11_rpc_client_vtable *vtable,
 
 typedef struct {
 	p11_rpc_transport base;
-	p11_array *argv;
 	char sfile[_POSIX_PATH_MAX];
 } rpc_exec;
 
 static void
-rpc_exec_disconnect (p11_rpc_client_vtable *vtable,
+rpc_disconnect (p11_rpc_client_vtable *vtable,
                      void *fini_reserved)
 {
 	rpc_exec *rex = (rpc_exec *)vtable;
@@ -675,72 +674,21 @@ rpc_exec_disconnect (p11_rpc_client_vtable *vtable,
 	rpc_transport_disconnect (vtable, fini_reserved);
 }
 
-static int
-set_cloexec_on_fd (void *data,
-                   int fd)
-{
-	int *max_fd = data;
-	if (fd >= *max_fd)
-		fcntl (fd, F_SETFD, FD_CLOEXEC);
-	return 0;
-}
-
 static CK_RV
-rpc_exec_connect (p11_rpc_client_vtable *vtable,
+rpc_connect (p11_rpc_client_vtable *vtable,
                   void *init_reserved)
 {
 	rpc_exec *rex = (rpc_exec *)vtable;
-	pid_t pid;
-	int max_fd;
-	uint32_t upid;
 	int errn;
 	unsigned char dummy = 1;
+	uint32_t upid;
 	struct iovec iov[2];
 
-	p11_debug ("executing rpc transport: %s", (char *)rex->argv->elem[0]);
-
-	/* check whether a server is already there and we can connect to it */
-	rex->base.socket = rpc_socket_new (rex->sfile, 1);
-	if (rex->base.socket != NULL) {
-		goto success;
-	}
-
-	pid = fork ();
-	switch (pid) {
-
-	/* Failure */
-	case -1:
-		p11_message_err (errno, "failed to fork for remote");
-		return CKR_DEVICE_ERROR;
-
-	/* Child */
-	case 0:
-#ifdef __linux__
-		prctl(PR_SET_PDEATHSIG, SIGTERM);
-#endif
-		p11_debug ("forked sec-mod server");
-		/* save the socket file */
-		setenv("P11_KIT_SOCKET", rex->sfile, 1);
-
-		/* Close file descriptors, except for above on exec */
-		max_fd = STDERR_FILENO + 1;
-		fdwalk (set_cloexec_on_fd, &max_fd);
-		execvp (rex->argv->elem[0], (char **)rex->argv->elem);
-
-		errn = errno;
-		p11_message_err (errn, "couldn't execute program for rpc: %s",
-		                 (char *)rex->argv->elem[0]);
-		_exit (errn);
-
-	/* The parent */
-	default:
-		break;
-	}
+	p11_debug ("executing rpc transport: %s", (char *)rex->sfile);
 
 	rex->base.socket = rpc_socket_new (rex->sfile, 0);
 	return_val_if_fail (rex->base.socket != NULL, CKR_GENERAL_ERROR);
 
- success:
 	/* this is read as version from the peer --nmav */
 	if (write_all (rex->base.socket->fd, &dummy, 1) != 1) {
 		p11_message_err (errno, "couldn't send version");
@@ -765,54 +713,30 @@ rpc_exec_connect (p11_rpc_client_vtable *vtable,
 }
 
 static void
-rpc_exec_free (void *data)
+rpc_free (void *data)
 {
 	rpc_exec *rex = data;
-	rpc_exec_disconnect (data, NULL);
+	rpc_disconnect (data, NULL);
 	rpc_transport_uninit (&rex->base);
-	p11_array_free (rex->argv);
 	remove(rex->sfile);
 	free (rex);
 }
 
-static void
-on_argv_parsed (char *argument,
-                void *data)
-{
-	p11_array *argv = data;
-
-	if (!p11_array_push (argv, strdup (argument)))
-		return_if_reached ();
-}
-
 static p11_rpc_transport *
-rpc_exec_init (const char *remote,
+rpc_init (const char *remote,
                const char *name)
 {
-	p11_array *argv;
 	rpc_exec *rex;
-	unsigned t;
-
-	argv = p11_array_new (free);
-	if (!p11_argv_parse (remote, on_argv_parsed, argv) || argv->num < 1) {
-		p11_message ("invalid remote command line: %s", remote);
-		p11_array_free (argv);
-		return NULL;
-	}
 
 	rex = calloc (1, sizeof (rpc_exec));
 	return_val_if_fail (rex != NULL, NULL);
 
-	p11_array_push (argv, NULL);
-	rex->argv = argv;
+	snprintf(rex->sfile, sizeof(rex->sfile), "%s", remote);
 
-	p11_rnd(&t, sizeof(t));
-	snprintf(rex->sfile, sizeof(rex->sfile), "/tmp/p11-kit-rpc.%u", t);
-
-	rex->base.vtable.connect = rpc_exec_connect;
-	rex->base.vtable.disconnect = rpc_exec_disconnect;
+	rex->base.vtable.connect = rpc_connect;
+	rex->base.vtable.disconnect = rpc_disconnect;
 	rex->base.vtable.transport = rpc_transport_buffer;
-	rpc_transport_init (&rex->base, name, rpc_exec_free);
+	rpc_transport_init (&rex->base, name, rpc_free);
 
 	p11_debug ("initialized rpc exec: %s", remote);
 	return &rex->base;
@@ -837,11 +761,9 @@ p11_rpc_transport_new (p11_virtual *virt,
 #endif
 
 	/* This is a command we can execute */
-	if (remote[0] == '|') {
-		rpc = rpc_exec_init (remote + 1, name);
-
-	} else {
-		p11_message ("remote not supported: %s", remote);
+	rpc = rpc_init (remote, name);
+	if (rpc == NULL) {
+		p11_message ("error initializing rpc for: %s", remote);
 		return NULL;
 	}
 
