@@ -369,8 +369,8 @@ main (int argc,
 {
 	CK_FUNCTION_LIST *module;
 	char *socket_file = NULL;
-	uid_t uid = -1;
-	gid_t gid = -1;
+	uid_t uid = -1, run_as_uid = -1;
+	gid_t gid = -1, run_as_gid = -1;
 	int opt;
 	int ret;
 
@@ -380,6 +380,8 @@ main (int argc,
 		opt_socket = 's',
 		opt_user = 'u',
 		opt_group = 'g',
+		opt_run_as_user = 'a',
+		opt_run_as_group = 'z',
 	};
 
 	struct option options[] = {
@@ -388,11 +390,15 @@ main (int argc,
 		{ "socket", required_argument, NULL, opt_socket },
 		{ "user", required_argument, NULL, opt_user },
 		{ "group", required_argument, NULL, opt_group },
+		{ "run-as-user", required_argument, NULL, opt_run_as_user },
+		{ "run-as-group", required_argument, NULL, opt_run_as_group },
 		{ 0 },
 	};
 
 	p11_tool_desc usages[] = {
-		{ 0, "usage: p11-kit remote <module> -s <socket-file> -u <allowed-user> -g <allowed-group>" },
+		{ 0, "usage: p11-kit remote --help" },
+		{ 0, "usage: p11-kit remote <module> -s <socket-file>" },
+		{ 0, "usage: p11-kit remote <module> -s <socket-file> -u <allowed-user> -g <allowed-group> --run-as-user <user> --run-as-group <group>" },
 		{ 0 },
 	};
 
@@ -422,6 +428,22 @@ main (int argc,
 			uid = pwd->pw_uid;
 			break;
 		}
+		case opt_run_as_group:
+			grp = getgrnam(optarg);
+			if (grp == NULL) {
+				p11_message ("unknown group: %s", optarg);
+				return 2;
+			}
+			run_as_gid = grp->gr_gid;
+			break;
+		case opt_run_as_user:
+			pwd = getpwnam(optarg);
+			if (pwd == NULL) {
+				p11_message ("unknown user: %s", optarg);
+				return 2;
+			}
+			run_as_uid = pwd->pw_uid;
+			break;
 		case opt_help:
 		case '?':
 			p11_tool_usage (usages, options);
@@ -438,6 +460,28 @@ main (int argc,
 	if (argc != 1) {
 		p11_message ("specify the module to remote");
 		return 2;
+	}
+
+	if (run_as_gid != -1) {
+		if (setgid(run_as_gid) == -1) {
+			e = errno;
+			p11_message("cannot set gid to %u: %s\n", (unsigned)run_as_gid, strerror(e));
+			return 1;
+		}
+
+		if (setgroups(1, &run_as_gid) == -1) {
+			e = errno;
+			p11_message("cannot setgroups to %u: %s\n", (unsigned)run_as_gid, strerror(e));
+			return 1;
+		}
+	}
+
+	if (run_as_uid != -1) {
+		if (setuid(run_as_uid) == -1) {
+			e = errno;
+			p11_message("cannot set uid to %u: %s\n", (unsigned)run_as_uid, strerror(e));
+			return 1;
+		}
 	}
 
 	if (socket_file == NULL) {
