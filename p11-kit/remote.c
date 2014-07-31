@@ -69,6 +69,7 @@ typedef void (*sighandler_t)(int);
 #endif
 
 static unsigned need_children_cleanup = 0;
+static unsigned terminate = 0;
 static unsigned children_avail = 0;
 
 static
@@ -205,6 +206,11 @@ static void handle_children(int signo)
 	need_children_cleanup = 1;
 }
 
+static void handle_term(int signo)
+{
+	terminate = 1;
+}
+
 int
 p11_kit_remote_serve_module (CK_FUNCTION_LIST *module,
                              const char *socket_file,
@@ -230,7 +236,11 @@ p11_kit_remote_serve_module (CK_FUNCTION_LIST *module,
 	sigemptyset(&blockset);
 	sigemptyset(&emptyset);
 	sigaddset(&blockset, SIGCHLD);
+	sigaddset(&blockset, SIGTERM);
+	sigaddset(&blockset, SIGINT);
 	ocsignal(SIGCHLD, handle_children);
+	ocsignal(SIGTERM, handle_term);
+	ocsignal(SIGINT, handle_term);
 
 	return_val_if_fail (module != NULL, 1);
 
@@ -290,6 +300,9 @@ p11_kit_remote_serve_module (CK_FUNCTION_LIST *module,
 	for (;;) {
 		if (need_children_cleanup)
 			cleanup_children();
+
+		if (terminate != 0)
+			goto exit;
 
 		FD_ZERO(&rd_set);
 		FD_SET(sd, &rd_set);
