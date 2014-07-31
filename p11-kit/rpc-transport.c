@@ -96,7 +96,7 @@ rpc_socket_new (const char *file, unsigned nowait)
 {
 	rpc_socket *sock;
 	struct sockaddr_un sa;
-	int ret;
+	int ret, e;
 	unsigned i;
 
 	memset(&sa, 0, sizeof(sa));
@@ -123,10 +123,11 @@ rpc_socket_new (const char *file, unsigned nowait)
 		p11_sleep_ms(1000);
 	}
 	if (ret == -1) {
+		e = errno;
 		close(sock->fd);
 		free(sock);
 		if (nowait == 0) {
-			p11_message ("could not connect to socket: %s", file);
+			p11_message ("could not connect to socket: %s: %s", file, strerror(e));
 			return_val_if_reached (NULL);
 		} else {
 			return NULL;
