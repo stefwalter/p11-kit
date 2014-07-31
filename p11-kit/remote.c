@@ -210,7 +210,8 @@ p11_kit_remote_serve_module (CK_FUNCTION_LIST *module,
                              const char *socket_file,
                              uid_t uid,
                              gid_t gid,
-                             unsigned foreground)
+                             unsigned foreground,
+                             unsigned timeout)
 {
 	p11_virtual virt;
 	p11_buffer options;
@@ -224,6 +225,7 @@ p11_kit_remote_serve_module (CK_FUNCTION_LIST *module,
 	sigset_t emptyset, blockset;
 	uid_t tuid;
 	gid_t tgid;
+	struct timespec ts;
 
 	sigemptyset(&blockset);
 	sigemptyset(&emptyset);
@@ -292,12 +294,14 @@ p11_kit_remote_serve_module (CK_FUNCTION_LIST *module,
 		FD_ZERO(&rd_set);
 		FD_SET(sd, &rd_set);
 
-		ret = pselect(sd + 1, &rd_set, NULL, NULL, NULL, &emptyset);
+		ts.tv_sec = timeout;
+		ts.tv_nsec = 0;
+		ret = pselect(sd + 1, &rd_set, NULL, NULL, &ts, &emptyset);
 		if (ret == -1 && errno == EINTR)
 			continue;
 
 		if (ret == 0 && children_avail == 0) { /* timeout */
-			p11_message ("no connections for 30 secs, exiting");
+			p11_message ("no connections to %s for %u secs, exiting", socket_file, timeout);
 			exit(0);
 		}
 
