@@ -216,7 +216,8 @@ p11_kit_remote_serve_module (CK_FUNCTION_LIST *module,
                              const char *socket_file,
                              uid_t uid,
                              gid_t gid,
-                             unsigned foreground)
+                             unsigned foreground,
+                             unsigned timeout)
 {
 	p11_virtual virt;
 	p11_buffer options;
@@ -230,6 +231,7 @@ p11_kit_remote_serve_module (CK_FUNCTION_LIST *module,
 	sigset_t emptyset, blockset;
 	uid_t tuid;
 	gid_t tgid;
+	struct timespec ts;
 
 	sigemptyset(&blockset);
 	sigemptyset(&emptyset);
@@ -298,12 +300,14 @@ p11_kit_remote_serve_module (CK_FUNCTION_LIST *module,
 		FD_ZERO(&rd_set);
 		FD_SET(sd, &rd_set);
 
-		ret = pselect(sd + 1, &rd_set, NULL, NULL, NULL, &emptyset);
+		ts.tv_sec = timeout;
+		ts.tv_nsec = 0;
+		ret = pselect(sd + 1, &rd_set, NULL, NULL, &ts, &emptyset);
 		if (ret == -1 && errno == EINTR)
 			continue;
 
 		if (ret == 0 && children_avail == 0) { /* timeout */
-			p11_message ("no connections for 30 secs, exiting");
+			p11_message ("no connections to %s for %u secs, exiting", socket_file, timeout);
 			exit(0);
 		}
 
@@ -379,6 +383,7 @@ main (int argc,
 	const struct passwd* pwd;
 	const struct group* grp;
 	unsigned foreground = 1;
+	unsigned timeout = 0;
 
 	enum {
 		opt_verbose = 'v',
@@ -389,6 +394,7 @@ main (int argc,
 		opt_run_as_user = 'a',
 		opt_run_as_group = 'z',
 		opt_foreground = 'f',
+		opt_timeout = 't',
 	};
 
 	struct option options[] = {
@@ -399,6 +405,7 @@ main (int argc,
 		{ "group", required_argument, NULL, opt_group },
 		{ "run-as-user", required_argument, NULL, opt_run_as_user },
 		{ "run-as-group", required_argument, NULL, opt_run_as_group },
+		{ "timeout", required_argument, NULL, opt_timeout },
 		{ 0 },
 	};
 
@@ -416,6 +423,9 @@ main (int argc,
 			break;
 		case opt_socket:
 			socket_file = strdup(optarg);
+			break;
+		case opt_timeout:
+			timeout = atoi(optarg);
 			break;
 		case opt_group: {
 			const struct group* grp = getgrnam(optarg);
@@ -503,7 +513,7 @@ main (int argc,
 	if (module == NULL)
 		return 1;
 
-	ret = p11_kit_remote_serve_module (module, socket_file, uid, gid, foreground);
+	ret = p11_kit_remote_serve_module (module, socket_file, uid, gid, foreground, timeout);
 	p11_kit_module_release (module);
 
 	return ret;
