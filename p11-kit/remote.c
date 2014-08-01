@@ -324,56 +324,58 @@ p11_kit_remote_serve_module (CK_FUNCTION_LIST *module,
 			goto exit;
 		}
 
-		sa_len = sizeof(sa);
-		cfd = accept(sd, (struct sockaddr *)&sa, &sa_len);
-		if (cfd == -1) {
-			e = errno;
-			if (e != EINTR) {
-				p11_message ("could not accept from socket %s: %s", socket_file, strerror(e));
+		if (FD_ISSET(sd, &rd_set)) {
+			sa_len = sizeof(sa);
+			cfd = accept(sd, (struct sockaddr *)&sa, &sa_len);
+			if (cfd == -1) {
+				e = errno;
+				if (e != EINTR) {
+					p11_message ("could not accept from socket %s: %s", socket_file, strerror(e));
+				}
+				continue;
 			}
-			continue;
-		}
 
-		/* check the uid of the peer */
-		rc = p11_get_upeer_id(cfd, &tuid, &tgid, NULL);
-		if (rc == -1) {
-			e = errno;
-			p11_message ("could not check uid from socket %s: %s", socket_file, strerror(e));
-			goto cont;
-		}
-
-		if (uid != -1) {
-			if (uid != tuid) {
-				p11_message ("connecting uid (%u) doesn't match expected (%u)",
-					(unsigned)tuid, (unsigned)uid);
+			/* check the uid of the peer */
+			rc = p11_get_upeer_id(cfd, &tuid, &tgid, NULL);
+			if (rc == -1) {
+				e = errno;
+				p11_message ("could not check uid from socket %s: %s", socket_file, strerror(e));
 				goto cont;
 			}
-		}
 
-		if (gid != -1) {
-			if (gid != tgid) {
-				p11_message ("connecting gid (%u) doesn't match expected (%u)",
-					(unsigned)tgid, (unsigned)gid);
-				goto cont;
+			if (uid != -1) {
+				if (uid != tuid) {
+					p11_message ("connecting uid (%u) doesn't match expected (%u)",
+						(unsigned)tuid, (unsigned)uid);
+					goto cont;
+				}
 			}
-		}
 
-		pid = fork();
-		switch(pid) {
-			case -1:
-				 p11_message_err (errno, "failed to fork for accept");
-				 continue;
-			case 0:
-				/* child */
-				sigprocmask(SIG_UNBLOCK, &blockset, NULL);
-				serve_module (socket_file, module, &options, &buffer, &virt, cfd);
-				_exit(0);
-			default:
-				children_avail++;
-				break;
-		}
+			if (gid != -1) {
+				if (gid != tgid) {
+					p11_message ("connecting gid (%u) doesn't match expected (%u)",
+						(unsigned)tgid, (unsigned)gid);
+					goto cont;
+				}
+			}
+
+			pid = fork();
+			switch(pid) {
+				case -1:
+					 p11_message_err (errno, "failed to fork for accept");
+					 continue;
+				case 0:
+					/* child */
+					sigprocmask(SIG_UNBLOCK, &blockset, NULL);
+					serve_module (socket_file, module, &options, &buffer, &virt, cfd);
+					_exit(0);
+				default:
+					children_avail++;
+					break;
+			}
  cont:
-		close(cfd);
+			close(cfd);
+		}
 	}
 
 	p11_buffer_uninit (&buffer);
