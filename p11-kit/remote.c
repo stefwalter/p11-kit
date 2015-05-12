@@ -46,6 +46,8 @@
 
 #include <assert.h>
 #include <errno.h>
+#include <grp.h>
+#include <pwd.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -402,6 +404,7 @@ main (int argc,
 	const struct group* grp;
 	unsigned foreground = 1;
 	unsigned timeout = 0;
+	int e;
 
 	enum {
 		opt_verbose = 'v',
