@@ -40,6 +40,7 @@
 #include "debug.h"
 #include "lexer.h"
 #include "message.h"
+#include "parser.h"
 #include "pem.h"
 #include "persist.h"
 #include "pkcs11.h"
@@ -558,6 +559,37 @@ certificate_to_attributes (const unsigned char *der,
 }
 
 static CK_ATTRIBUTE *
+trusted_to_attributes (const unsigned char *der,
+                       size_t length)
+{
+	CK_ATTRIBUTE *attrs;
+	p11_parser *parser;
+	p11_array *parsed;
+	int ret;
+
+	CK_OBJECT_CLASS klassv = CKO_CERTIFICATE;
+	CK_CERTIFICATE_TYPE x509 = CKC_X_509;
+
+	CK_ATTRIBUTE klass = { CKA_CLASS, &klassv, sizeof (klassv) };
+	CK_ATTRIBUTE certificate_type = { CKA_CERTIFICATE_TYPE, &x509, sizeof (x509) };
+	CK_ATTRIBUTE value = { CKA_VALUE, (void *)der, length };
+
+	parser = p11_parser_new (NULL);
+
+	ret = p11_parser_format_trusted (parser, der, length);
+	parsed = p11_parser_parsed (parser);
+
+	if (ret != P11_PARSE_SUCCESS || parsed->num == 0)
+		return NULL;
+
+	attrs = p11_attrs_build (parsed->elem[0], &klass, &certificate_type, &value, NULL);
+
+	parsed->elem[0] = NULL;
+	p11_parser_free (parser);
+	return attrs;
+}
+
+static CK_ATTRIBUTE *
 public_key_to_attributes (const unsigned char *der,
                           size_t length)
 {
@@ -585,6 +617,16 @@ on_pem_block (const char *type,
 		attrs = certificate_to_attributes (contents, length);
 		pb->attrs = p11_attrs_merge (pb->attrs, attrs, false);
 		pb->result = true;
+
+	} else if (strcmp (type, "TRUSTED CERTIFICATE") == 0) {
+		attrs = trusted_to_attributes (contents, length);
+		if (attrs) {
+			pb->attrs = p11_attrs_merge (pb->attrs, attrs, false);
+			pb->result = true;
+		} else {
+			p11_message ("invalid trusted pem block in file: %s", pb->lexer->filename);
+			pb->result = false;
+		}
 
 	} else if (strcmp (type, "PUBLIC KEY") == 0) {
 		attrs = public_key_to_attributes (contents, length);

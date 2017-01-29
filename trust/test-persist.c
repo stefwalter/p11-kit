@@ -424,6 +424,51 @@ test_pem_public_key (void)
 	check_write_success (output, (attrs, NULL));
 }
 
+static void
+test_pem_trusted_cert (void)
+{
+	const char *output = "[p11-kit-object-v1]\n"
+	                    "id: \"292c92\"\n"
+	"-----BEGIN TRUSTED CERTIFICATE-----\n"
+	"MIICPDCCAaUCED9pHoGc8JpK83P/uUii5N0wDQYJKoZIhvcNAQEFBQAwXzELMAkG\n"
+	"A1UEBhMCVVMxFzAVBgNVBAoTDlZlcmlTaWduLCBJbmMuMTcwNQYDVQQLEy5DbGFz\n"
+	"cyAxIFB1YmxpYyBQcmltYXJ5IENlcnRpZmljYXRpb24gQXV0aG9yaXR5MB4XDTk2\n"
+	"MDEyOTAwMDAwMFoXDTI4MDgwMjIzNTk1OVowXzELMAkGA1UEBhMCVVMxFzAVBgNV\n"
+	"BAoTDlZlcmlTaWduLCBJbmMuMTcwNQYDVQQLEy5DbGFzcyAxIFB1YmxpYyBQcmlt\n"
+	"YXJ5IENlcnRpZmljYXRpb24gQXV0aG9yaXR5MIGfMA0GCSqGSIb3DQEBAQUAA4GN\n"
+	"ADCBiQKBgQDlGb9to1ZhLZlIcfZn3rmN67eehoAKkQ76OCWvRoiC5XOooJskXQ0f\n"
+	"zGVuDLDQVoQYh5oGmxChc9+0WDlrbsH2FdWoqD+qEgaNMax/sDTXjzRniAnNFBHi\n"
+	"TkVWaR94AoDa3EeRKbs2yWNcxeDXLYd7obcysHswuiovMaruo2fa2wIDAQABMA0G\n"
+	"CSqGSIb3DQEBBQUAA4GBAFgVKTk8d6PaXCUDfGD67gmZPCcQcMgMCeazh88K4hiW\n"
+	"NWLMv5sneYlfycQJ9M61Hd8qveXbhpxoJeUwfLaJFf5n0a3hUKw8fGJLj7qE1xIV\n"
+	"Gx/KXQ/BUpQqEZnae88MNhPVNdwQGVnqlMEAv3WP2fr9dgTbYruQagPZRjXZ+Hxb\n"
+	"MA4MDEN1c3RvbSBMYWJlbA==\n"
+	"-----END TRUSTED CERTIFICATE-----\n\n";
+
+	CK_ATTRIBUTE attrs[] = {
+		{ CKA_ID, "292c92", 6, },
+		{ CKA_CERTIFICATE_TYPE, &x509, sizeof (x509) },
+		{ CKA_INVALID },
+	};
+
+	check_read_success (output, (attrs, NULL));
+}
+
+static void
+test_pem_trusted_fail (void)
+{
+	const char *input = "[p11-kit-object-v1]\n"
+	                    "id: \"292c92\"\n"
+	"-----BEGIN TRUSTED CERTIFICATE-----\n"
+	"MIICPDCCAaUCED9pHoGc8JpK83P/uUii5N0wDQYJKoZIhvcNAQEFBQAwXzELMAkG\n"
+	"-----END TRUSTED CERTIFICATE-----\n\n";
+
+	p11_message_quiet ();
+
+	check_read_failure (input);
+
+	p11_message_loud ();
+}
 
 static void
 test_pem_invalid (void)
@@ -621,6 +666,8 @@ main (int argc,
 	p11_test (test_pem_block, "/persist/pem_block");
 	p11_test (test_pem_middle, "/persist/pem-middle");
 	p11_test (test_pem_public_key, "/persist/pem-public-key");
+	p11_test (test_pem_trusted_cert, "/persist/pem-trusted-cert");
+	p11_test (test_pem_trusted_fail, "/persist/pem-trusted-fail");
 	p11_test (test_pem_invalid, "/persist/pem_invalid");
 	p11_test (test_pem_unsupported, "/persist/pem_unsupported");
 	p11_test (test_pem_first, "/persist/pem_first");

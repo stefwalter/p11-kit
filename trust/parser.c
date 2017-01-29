@@ -483,10 +483,10 @@ build_openssl_extensions (p11_parser *parser,
 	return cert;
 }
 
-static int
-parse_openssl_trusted_certificate (p11_parser *parser,
-                                   const unsigned char *data,
-                                   size_t length)
+int
+p11_parser_format_trusted (p11_parser *parser,
+                           const unsigned char *data,
+                           size_t length)
 {
 	char message[ASN1_MAX_ERROR_DESCRIPTION_SIZE];
 	CK_ATTRIBUTE *attrs;
@@ -577,7 +577,7 @@ on_pem_block (const char *type,
 		ret = p11_parser_format_x509 (parser, contents, length);
 
 	} else if (strcmp (type, "TRUSTED CERTIFICATE") == 0) {
-		ret = parse_openssl_trusted_certificate (parser, contents, length);
+		ret = p11_parser_format_trusted (parser, contents, length);
 
 	} else {
 		p11_debug ("Saw unsupported or unrecognized PEM block of type %s", type);

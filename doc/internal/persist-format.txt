@@ -29,6 +29,11 @@ A 'CERTIFICATE' type PEM block contributes the 'value', 'class',
 'certificate-category', 'check-value', 'serial-number', 'public-key-info'
 attributes with appropriate values.
 
+A 'TRUSTED CERTIFICATE' type PEM block contributes the same attributes
+as 'CERTIFICATE'. In particular additional OpenSSL specific data is not
+included in the attributes when parsed as part of a p11-kit-object-v1
+file.
+
 A 'PUBLIC KEY' type PEM block contributes the 'public-key-info' attribute
 with an appropriate value.
 

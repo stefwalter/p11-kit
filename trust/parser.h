@@ -86,4 +86,8 @@ int           p11_parser_format_x509         (p11_parser *parser,
                                               const unsigned char *data,
                                               size_t length);
 
+int           p11_parser_format_trusted      (p11_parser *parser,
+                                              const unsigned char *data,
+                                              size_t length);
+
 #endif /* P11_PARSER_H_ */
